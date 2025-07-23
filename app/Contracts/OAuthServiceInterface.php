@@ -5,128 +5,152 @@ namespace App\Contracts;
 use App\Models\LfVendorEmailConfiguration;
 
 /**
- * Interface para servicios de OAuth2.0
+ * Interface for OAuth2.0 services.
  *
- * Define el contrato común para todos los servicios de autenticación OAuth2.0
- * con proveedores de correo electrónico (Microsoft Graph y Google API).
+ * Defines the common contract for all OAuth2.0 authentication services
+ * with email providers (Microsoft Graph and Google API).
  *
- * Esta interfaz asegura que todos los servicios implementen las mismas
- * operaciones básicas de OAuth2.0 y envío de correos electrónicos.
+ * This interface ensures that all implementing services adhere to the same
+ * basic OAuth2.0 operations and email sending functionalities.
  */
 interface OAuthServiceInterface
 {
     /**
-     * Obtiene la URL de autenticación para el proveedor de API.
+     * Retrieves the authentication URL for the API provider.
      *
-     * @param int $uid Identificador único del proveedor de configuración.
-     * @return string URL de autorización OAuth2.0
-     * @throws \App\Exceptions\OAuthException Si la configuración no es válida
+     * This URL is used to redirect the user to the OAuth provider's authorization page.
+     *
+     * @param int $uid The unique identifier of the configuration provider.
+     * @return string The OAuth2.0 authorization URL.
+     * @throws OAuthException If the configuration is invalid or cannot be retrieved.
      */
     public function getAuthUrl(int $uid): string;
 
     /**
-     * Maneja el callback de la autenticación y obtiene el token de acceso.
+     * Handles the authentication callback and obtains the access token.
      *
-     * @param string $code Código recibido tras la autenticación.
-     * @param string|null $state Estado opcional para verificar la autenticación.
-     * @return array Los datos del token (access_token, refresh_token, expires_in, etc.)
-     * @throws \App\Exceptions\OAuthException Si el callback falla
+     * This method processes the authorization code received from the OAuth provider
+     * and exchanges it for access and refresh tokens.
+     *
+     * @param string $code The authorization code received after successful authentication.
+     * @param string|null $state An optional state parameter for authentication verification (CSRF protection).
+     * @return array An associative array containing token data (e.g., 'access_token', 'refresh_token', 'expires_in').
+     * @throws OAuthException If the callback fails or token exchange is unsuccessful.
      */
     public function handleCallback(string $code, ?string $state = null): array;
 
     /**
-     * Almacena el token de acceso en la base de datos.
+     * Stores the access token data in the database.
      *
-     * @param LfVendorEmailConfiguration $config Configuración del proveedor.
-     * @param array $tokenData Datos del token (access_token, refresh_token, etc).
-     * @return LfVendorEmailConfiguration La configuración actualizada
-     * @throws \App\Exceptions\OAuthException Si no se puede almacenar el token
+     * This method persists the obtained access and refresh tokens associated with
+     * a specific vendor email configuration.
+     *
+     * @param LfVendorEmailConfiguration $config The vendor email configuration model.
+     * @param array $tokenData The token data (e.g., 'access_token', 'refresh_token', 'expires_in').
+     * @return LfVendorEmailConfiguration The updated vendor email configuration model.
+     * @throws OAuthException If the token cannot be stored due to database or data issues.
      */
     public function storeToken(LfVendorEmailConfiguration $config, array $tokenData): LfVendorEmailConfiguration;
 
     /**
-     * Obtiene un token válido, si no está caducado.
+     * Retrieves a valid access token, refreshing it if it has expired.
      *
-     * @param LfVendorEmailConfiguration $config Configuración del proveedor.
-     * @param string|null $email Correo opcional para obtener un token asociado a un usuario.
-     * @return LfVendorEmailConfiguration El token válido
-     * @throws \App\Exceptions\OAuthException Si no hay token válido disponible
+     * This method ensures that an active and valid token is always returned,
+     * handling token refreshing automatically when necessary.
+     *
+     * @param LfVendorEmailConfiguration $config The vendor email configuration.
+     * @param string|null $email Optional email address to retrieve a token associated with a specific user (if applicable).
+     * @return LfVendorEmailConfiguration The configuration model with the valid token.
+     * @throws OAuthException If no valid token is available or cannot be refreshed.
      */
     public function getValidToken(LfVendorEmailConfiguration $config, ?string $email = null): LfVendorEmailConfiguration;
 
     /**
-     * Refresca un token de acceso caducado.
+     * Refreshes an expired access token using the refresh token.
      *
-     * @param LfVendorEmailConfiguration $config Configuración con token a refrescar.
-     * @return LfVendorEmailConfiguration Configuración con token actualizado
-     * @throws \App\Exceptions\OAuthException Si no se puede refrescar el token
+     * This method communicates with the OAuth provider to obtain a new access token
+     * without requiring user re-authentication.
+     *
+     * @param LfVendorEmailConfiguration $config The configuration containing the token to be refreshed.
+     * @return LfVendorEmailConfiguration The updated configuration model with the new access token.
+     * @throws OAuthException If the token cannot be refreshed.
      */
     public function refreshToken(LfVendorEmailConfiguration $config): LfVendorEmailConfiguration;
 
     /**
-     * Envía un correo electrónico a través del proveedor de la API.
+     * Sends an email through the API provider.
      *
-     * @param LfVendorEmailConfiguration $config Configuración con token de acceso válido.
-     * @param array $emailData Datos del correo (destinatario, asunto, cuerpo, etc).
-     * @return bool true si el correo se envió exitosamente
-     * @throws \App\Exceptions\EmailException Si no se puede enviar el correo
+     * This method uses the configured OAuth service to dispatch an email.
+     *
+     * @param LfVendorEmailConfiguration $config The configuration with a valid access token.
+     * @param array $emailData An associative array containing email details (e.g., 'to', 'subject', 'body', 'attachments').
+     * @return bool True if the email was sent successfully, false otherwise.
+     * @throws EmailException If the email cannot be sent due to provider errors or invalid data.
      */
     public function sendEmail(LfVendorEmailConfiguration $config, array $emailData): bool;
 
     /**
-     * Obtiene información del usuario utilizando el token de acceso.
+     * Retrieves user information using the provided access token.
      *
-     * @param string $accessToken Token de acceso.
-     * @return array Información del usuario
-     * @throws \App\Exceptions\OAuthException Si no se puede obtener la información del usuario
+     * This method typically makes a call to the OAuth provider's user info endpoint.
+     *
+     * @param string $accessToken The access token to authenticate the user info request.
+     * @return array An associative array containing user information (e.g., 'id', 'email', 'name').
+     * @throws OAuthException If user information cannot be retrieved (e.g., invalid token, API error).
      */
     public function getUserInfo(string $accessToken): array;
 
     /**
-     * Obtiene el nombre del proveedor de API (Microsoft o Google).
+     * Retrieves the name of the API provider (e.g., 'Microsoft' or 'Google').
      *
-     * @return string Nombre del proveedor
+     * @return string The name of the provider.
      */
     public function getProviderName(): string;
 
     /**
-     * Verifica si el token es válido haciendo una petición de prueba.
+     * Validates an access token by making a test request to the provider.
      *
-     * @param string $accessToken Token de acceso a verificar.
-     * @return bool true si el token es válido
+     * This method can be used to verify the active status and validity of a token.
+     *
+     * @param string $accessToken The access token to validate.
+     * @return bool True if the token is valid, false otherwise.
      */
     public function validateToken(string $accessToken): bool;
 
     /**
-     * Revoca el token de acceso en el proveedor.
+     * Revokes the access token with the OAuth provider.
      *
-     * @param LfVendorEmailConfiguration $config Configuración con token a revocar.
-     * @return bool true si se revocó exitosamente
-     * @throws \App\Exceptions\OAuthException Si no se puede revocar el token
+     * This method invalidates the token, preventing further use.
+     *
+     * @param LfVendorEmailConfiguration $config The configuration containing the token to revoke.
+     * @return bool True if the token was successfully revoked, false otherwise.
+     * @throws OAuthException If the token cannot be revoked.
      */
     public function revokeToken(LfVendorEmailConfiguration $config): bool;
 
     /**
-     * Obtiene los scopes (permisos) disponibles para el proveedor.
+     * Retrieves the available scopes (permissions) for the provider.
      *
-     * @return array Lista de scopes disponibles
+     * @return array<int, string> A list of available scopes.
      */
     public function getAvailableScopes(): array;
 
     /**
-     * Verifica si el proveedor soporta un scope específico.
+     * Checks if the provider supports a specific scope.
      *
-     * @param string $scope Scope a verificar.
-     * @return bool true si el scope es soportado
+     * @param string $scope The scope to check for support.
+     * @return bool True if the scope is supported, false otherwise.
      */
     public function supportsScope(string $scope): bool;
 
     /**
-     * Almacena una nueva configuración para el proveedor de correo electrónico.
+     * Stores a new email provider configuration.
      *
-     * @param array $configData Datos de configuración (vec_vendor_id, vec_location_id, etc.).
-     * @return LfVendorEmailConfiguration La configuración creada
-     * @throws \App\Exceptions\OAuthException Si no se puede almacenar la configuración
+     * This method persists the initial configuration details for a new OAuth provider.
+     *
+     * @param array $configData An associative array of configuration data (e.g., 'vec_vendor_id', 'vec_location_id', 'client_id', 'client_secret').
+     * @return LfVendorEmailConfiguration The newly created configuration model.
+     * @throws OAuthException If the configuration cannot be stored.
      */
     public function storeConfiguration(array $configData): LfVendorEmailConfiguration;
 }
