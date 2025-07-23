@@ -6,53 +6,74 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
- * Modelo para la configuración de proveedores de correo electrónico
+ * Model for email provider configurations.
  *
- * Representa la configuración de APIs de proveedores de correo (Microsoft Graph y Google API)
- * incluyendo credenciales, tokens de acceso y configuración de OAuth2.
+ * Represents the API configurations for email providers (Microsoft Graph and Google API),
+ * including credentials, access tokens, and OAuth2.0 setup.
  *
- * @property int $uid Identificador único de la configuración
- * @property int $vec_vendor_id ID del proveedor
- * @property int $vec_location_id ID de la ubicación asociada
- * @property string|null $vec_user_email Email del usuario configurado
- * @property string $vec_provider_api Proveedor de API (microsoft o google)
- * @property string $vec_client_id ID del cliente de la API
- * @property string $vec_client_secret Secreto del cliente de la API
- * @property string $vec_tenant_id ID del inquilino (tenant) de la API
- * @property string $vec_redirect_uri URI de redirección para autenticación
- * @property string $vec_access_token Token de acceso de la API
- * @property string|null $vec_refresh_token Token de refresco de la API
- * @property int $vec_expires_in Duración de validez del token en segundos
- * @property Carbon $vec_expires_at Fecha y hora de expiración del token
- * @property Carbon|null $TS_create Fecha de creación del registro
- * @property Carbon|null $TS_update Fecha de última actualización
- * @property Carbon|null $del Fecha de eliminación suave
+ * @property int $uid Unique identifier for the configuration.
+ * @property int $vec_vendor_id ID of the associated vendor.
+ * @property int $vec_location_id ID of the associated location.
+ * @property string|null $vec_user_email Configured user's email address.
+ * @property string $vec_provider_api API provider (e.g., 'microsoft' or 'google').
+ * @property string $vec_client_id API client ID.
+ * @property string $vec_client_secret API client secret.
+ * @property string $vec_tenant_id API tenant ID.
+ * @property string $vec_redirect_uri Redirect URI for authentication.
+ * @property string $vec_access_token API access token.
+ * @property string|null $vec_refresh_token API refresh token.
+ * @property int $vec_expires_in Token validity duration in seconds.
+ * @property Carbon $vec_expires_at Date and time of token expiration.
+ * @property Carbon|null $TS_create Creation timestamp of the record.
+ * @property Carbon|null $TS_update Last update timestamp of the record.
+ * @property Carbon|null $del Soft deletion timestamp.
  */
 class LfVendorEmailConfiguration extends Model
 {
     use HasFactory, SoftDeletes;
 
     /**
-     * Nombre de la tabla en la base de datos
+     * The table associated with the model.
+     *
+     * @var string
      */
     protected $table = 'lf_vendor_email_configuration';
 
     /**
-     * Clave primaria personalizada
+     * The primary key for the model.
+     *
+     * @var string
      */
     protected $primaryKey = 'uid';
 
     /**
-     * Timestamps personalizados
+     * The name of the "created at" column.
+     *
+     * @var string
      */
     public const CREATED_AT = 'TS_create';
+
+    /**
+     * The name of the "updated at" column.
+     *
+     * @var string
+     */
     public const UPDATED_AT = 'TS_update';
+
+    /**
+     * The name of the "deleted at" column.
+     *
+     * @var string
+     */
     public const DELETED_AT = 'del';
 
     /**
-     * Campos que pueden ser asignados masivamente
+     * The attributes that are mass assignable.
+     *
+     * @var array<int, string>
      */
     protected $fillable = [
         'vec_vendor_id',
@@ -70,7 +91,9 @@ class LfVendorEmailConfiguration extends Model
     ];
 
     /**
-     * Campos que deben ser tratados como fechas
+     * The attributes that should be mutated to dates.
+     *
+     * @var array<int, string>
      */
     protected $dates = [
         'vec_expires_at',
@@ -80,7 +103,9 @@ class LfVendorEmailConfiguration extends Model
     ];
 
     /**
-     * Campos que deben ser convertidos a tipos nativos
+     * The attributes that should be cast.
+     *
+     * @var array<string, string>
      */
     protected $casts = [
         'uid' => 'integer',
@@ -94,7 +119,9 @@ class LfVendorEmailConfiguration extends Model
     ];
 
     /**
-     * Campos que deben ser ocultos en la serialización
+     * The attributes that should be hidden for serialization.
+     *
+     * @var array<int, string>
      */
     protected $hidden = [
         'vec_client_secret',
@@ -103,18 +130,33 @@ class LfVendorEmailConfiguration extends Model
     ];
 
     /**
-     * Proveedores de API válidos
+     * Constant for the Microsoft API provider.
+     *
+     * @var string
      */
     public const PROVIDER_MICROSOFT = 'microsoft';
+
+    /**
+     * Constant for the Google API provider.
+     *
+     * @var string
+     */
     public const PROVIDER_GOOGLE = 'google';
 
+    /**
+     * Array of valid API providers.
+     *
+     * @var array<int, string>
+     */
     public const VALID_PROVIDERS = [
         self::PROVIDER_MICROSOFT,
         self::PROVIDER_GOOGLE,
     ];
 
     /**
-     * Verifica si el token de acceso ha expirado
+     * Checks if the access token has expired.
+     *
+     * @return bool True if the token has expired, false otherwise.
      */
     public function isTokenExpired(): bool
     {
@@ -122,7 +164,9 @@ class LfVendorEmailConfiguration extends Model
     }
 
     /**
-     * Verifica si el token está próximo a expirar (dentro de los próximos 5 minutos)
+     * Checks if the token is expiring soon (within the next 5 minutes).
+     *
+     * @return bool True if the token is expiring soon, false otherwise.
      */
     public function isTokenExpiringSoon(): bool
     {
@@ -130,7 +174,9 @@ class LfVendorEmailConfiguration extends Model
     }
 
     /**
-     * Verifica si el token es válido (no expirado)
+     * Checks if the token is currently valid (not expired).
+     *
+     * @return bool True if the token is valid, false otherwise.
      */
     public function hasValidToken(): bool
     {
@@ -138,7 +184,9 @@ class LfVendorEmailConfiguration extends Model
     }
 
     /**
-     * Verifica si es un proveedor Microsoft
+     * Checks if the configured provider is Microsoft.
+     *
+     * @return bool True if the provider is Microsoft, false otherwise.
      */
     public function isMicrosoftProvider(): bool
     {
@@ -146,7 +194,9 @@ class LfVendorEmailConfiguration extends Model
     }
 
     /**
-     * Verifica si es un proveedor Google
+     * Checks if the configured provider is Google.
+     *
+     * @return bool True if the provider is Google, false otherwise.
      */
     public function isGoogleProvider(): bool
     {
@@ -154,7 +204,10 @@ class LfVendorEmailConfiguration extends Model
     }
 
     /**
-     * Actualiza la información del token
+     * Updates the token information for the configuration.
+     *
+     * @param array $tokenData An associative array containing new token data (e.g., 'access_token', 'refresh_token', 'expires_in').
+     * @return bool True if the update was successful, false otherwise.
      */
     public function updateTokenInfo(array $tokenData): bool
     {
@@ -167,59 +220,83 @@ class LfVendorEmailConfiguration extends Model
     }
 
     /**
-     * Scope para filtrar por proveedor
+     * Scope a query to only include configurations for a specific provider.
+     *
+     * @param Builder $query The Eloquent query builder instance.
+     * @param string $provider The name of the provider (e.g., 'microsoft', 'google').
+     * @return Builder
      */
-    public function scopeByProvider($query, string $provider)
+    public function scopeByProvider(Builder $query, string $provider)
     {
         return $query->where('vec_provider_api', $provider);
     }
 
     /**
-     * Scope para filtrar por vendor
+     * Scope a query to only include configurations for a specific vendor.
+     *
+     * @param Builder $query The Eloquent query builder instance.
+     * @param int $vendorId The ID of the vendor.
+     * @return Builder
      */
-    public function scopeByVendor($query, int $vendorId)
+    public function scopeByVendor(Builder $query, int $vendorId)
     {
         return $query->where('vec_vendor_id', $vendorId);
     }
 
     /**
-     * Scope para filtrar por location
+     * Scope a query to only include configurations for a specific location.
+     *
+     * @param Builder $query The Eloquent query builder instance.
+     * @param int $locationId The ID of the location.
+     * @return Builder
      */
-    public function scopeByLocation($query, int $locationId)
+    public function scopeByLocation(Builder $query, int $locationId)
     {
         return $query->where('vec_location_id', $locationId);
     }
 
     /**
-     * Scope para obtener configuraciones con tokens válidos
+     * Scope a query to only include configurations with valid (non-expired) tokens.
+     *
+     * @param Builder $query The Eloquent query builder instance.
+     * @return Builder
      */
-    public function scopeWithValidTokens($query)
+    public function scopeWithValidTokens(Builder $query)
     {
         return $query->where('vec_expires_at', '>', Carbon::now());
     }
 
     /**
-     * Scope para obtener configuraciones con tokens expirados
+     * Scope a query to only include configurations with expired tokens.
+     *
+     * @param Builder $query The Eloquent query builder instance.
+     * @return Builder
      */
-    public function scopeWithExpiredTokens($query)
+    public function scopeWithExpiredTokens(Builder $query)
     {
         return $query->where('vec_expires_at', '<=', Carbon::now());
     }
 
     /**
-     * Accessor para obtener el proveedor formateado
+     * Accessor for the formatted display name of the provider.
+     *
+     * @return string The display name of the provider (e.g., 'Microsoft Graph', 'Google API').
      */
     public function getProviderDisplayNameAttribute(): string
     {
         return match ($this->vec_provider_api) {
             self::PROVIDER_MICROSOFT => 'Microsoft Graph',
             self::PROVIDER_GOOGLE => 'Google API',
-            default => 'Desconocido',
+            default => 'Unknown',
         };
     }
 
     /**
-     * Accessor para obtener el tiempo restante hasta la expiración
+     * Accessor for the human-readable time remaining until token expiration.
+     *
+     * Returns "Expired" if the token has already expired.
+     *
+     * @return string|null The human-readable time until expiration, or null if expiration date is not set.
      */
     public function getTimeUntilExpirationAttribute(): ?string
     {
@@ -229,25 +306,34 @@ class LfVendorEmailConfiguration extends Model
 
         $now = Carbon::now();
         if ($now->greaterThan($this->vec_expires_at)) {
-            return 'Expirado';
+            return 'Expired';
         }
 
         return $now->diffForHumans($this->vec_expires_at);
     }
 
     /**
-     * Mutator para el proveedor de API
+     * Mutator for the API provider attribute.
+     *
+     * Ensures that only valid provider values are set.
+     *
+     * @param string $value The provider API value to set.
+     * @throws \InvalidArgumentException If an invalid provider value is provided.
      */
     public function setVecProviderApiAttribute(string $value): void
     {
         if (!in_array($value, self::VALID_PROVIDERS)) {
-            throw new \InvalidArgumentException("Proveedor inválido: {$value}");
+            throw new \InvalidArgumentException("Invalid provider: {$value}");
         }
         $this->attributes['vec_provider_api'] = $value;
     }
 
     /**
-     * Boot method para eventos del modelo
+     * The "booting" method of the model.
+     *
+     * Sets `TS_create` on creation and `TS_update` on update if not already set.
+     *
+     * @return void
      */
     protected static function boot(): void
     {
