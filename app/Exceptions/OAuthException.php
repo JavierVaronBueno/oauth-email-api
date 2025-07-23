@@ -9,41 +9,47 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Excepción base para errores de OAuth2.0
+ * Base exception for OAuth2.0 errors.
  *
- * Maneja errores relacionados con la autenticación OAuth2.0,
- * tokens de acceso, refresh tokens y procesos de autorización.
+ * Handles errors related to OAuth2.0 authentication,
+ * access tokens, refresh tokens, and authorization processes.
  */
 class OAuthException extends Exception
 {
     /**
-     * Código de error específico del OAuth
+     * Specific OAuth error code.
+     *
+     * @var string|null
      */
     protected ?string $oauthErrorCode;
 
     /**
-     * Descripción detallada del error
+     * Detailed description of the error.
+     *
+     * @var string|null
      */
     protected ?string $oauthErrorDescription;
 
     /**
-     * Datos adicionales del error
+     * Additional error data.
+     *
+     * @var array
      */
     protected array $errorData;
 
     /**
-     * Constructor de la excepción OAuth
+     * Constructor for the OAuthException.
      *
-     * @param string $message Mensaje de error
-     * @param int $code Código de error HTTP
-     * @param string|null $oauthErrorCode Código específico del OAuth
-     * @param string|null $oauthErrorDescription Descripción del error OAuth
-     * @param Exception|null $previous Excepción previa
-     * @param array $errorData Datos adicionales del error
+     * @param string $message The error message.
+     * @param int $code The HTTP status code.
+     * @param string|null $oauthErrorCode The specific OAuth error code.
+     * @param string|null $oauthErrorDescription The detailed OAuth error description.
+     * @param Exception|null $previous The previous exception, if any.
+     * @param array $errorData Additional data related to the error.
      */
     public function __construct(
-        string $message = 'Error de autenticación OAuth2.0',
-        int $code = 401,
+        string $message = 'OAuth2.0 authentication error',
+        int $code = Response::HTTP_INTERNAL_SERVER_ERROR,
         ?string $oauthErrorCode = null,
         ?string $oauthErrorDescription = null,
         ?Exception $previous = null,
@@ -57,7 +63,9 @@ class OAuthException extends Exception
     }
 
     /**
-     * Obtiene el código de error OAuth específico
+     * Get the specific OAuth error code.
+     *
+     * @return string|null
      */
     public function getOAuthErrorCode(): ?string
     {
@@ -65,7 +73,9 @@ class OAuthException extends Exception
     }
 
     /**
-     * Obtiene la descripción detallada del error OAuth
+     * Get the detailed OAuth error description.
+     *
+     * @return string|null
      */
     public function getOAuthErrorDescription(): ?string
     {
@@ -73,7 +83,9 @@ class OAuthException extends Exception
     }
 
     /**
-     * Obtiene los datos adicionales del error
+     * Get additional error data.
+     *
+     * @return array
      */
     public function getErrorData(): array
     {
@@ -81,7 +93,13 @@ class OAuthException extends Exception
     }
 
     /**
-     * Renderiza la excepción para respuesta HTTP
+     * Render the exception as an HTTP response.
+     *
+     * This method prepares a JSON response for the client,
+     * including relevant OAuth error details and logging the full error.
+     *
+     * @param Request $request The current HTTP request.
+     * @return JsonResponse
      */
     public function render(Request $request): JsonResponse
     {
@@ -116,67 +134,81 @@ class OAuthException extends Exception
     }
 
     /**
-     * Crea una excepción para token expirado
+     * Create an exception for an expired access token.
+     *
+     * @param string $provider The OAuth provider (e.g., 'Google', 'Microsoft').
+     * @return static
      */
     public static function tokenExpired(string $provider = 'Unknown'): self
     {
         return new self(
-            "Token de acceso expirado para {$provider}",
-            401,
+            "Access token expired for {$provider}",
+            Response::HTTP_UNAUTHORIZED,
             'token_expired',
-            'El token de acceso ha expirado y debe ser renovado'
+            'The access token has expired and must be refreshed'
         );
     }
 
     /**
-     * Crea una excepción para token inválido
+     * Create an exception for an invalid access token.
+     *
+     * @param string $provider The OAuth provider (e.g., 'Google', 'Microsoft').
+     * @return static
      */
     public static function invalidToken(string $provider = 'Unknown'): self
     {
         return new self(
-            "Token de acceso inválido para {$provider}",
-            401,
+            "Invalid access token for {$provider}",
+            Response::HTTP_UNAUTHORIZED,
             'invalid_token',
-            'El token de acceso proporcionado no es válido'
+            'The provided access token is not valid'
         );
     }
 
     /**
-     * Crea una excepción para refresh token no disponible
+     * Create an exception for a missing refresh token.
+     *
+     * @param string $provider The OAuth provider (e.g., 'Google', 'Microsoft').
+     * @return static
      */
     public static function noRefreshToken(string $provider = 'Unknown'): self
     {
         return new self(
-            "No hay refresh token disponible para {$provider}",
-            401,
+            "No refresh token available for {$provider}",
+            Response::HTTP_UNAUTHORIZED,
             'no_refresh_token',
-            'No se puede renovar el token sin un refresh token válido'
+            'Cannot refresh the token without a valid refresh token'
         );
     }
 
     /**
-     * Crea una excepción para código de autorización inválido
+     * Create an exception for an invalid authorization code.
+     *
+     * @return static
      */
     public static function invalidAuthorizationCode(): self
     {
         return new self(
-            'Código de autorización inválido',
-            400,
+            'Invalid authorization code',
+            Response::HTTP_BAD_REQUEST,
             'invalid_authorization_code',
-            'El código de autorización recibido no es válido'
+            'The received authorization code is not valid'
         );
     }
 
     /**
-     * Crea una excepción para configuración inválida
+     * Create an exception for invalid OAuth2.0 configuration.
+     *
+     * @param string $details Optional details about the invalid configuration.
+     * @return static
      */
     public static function invalidConfiguration(string $details = ''): self
     {
         return new self(
-            'Configuración OAuth2.0 inválida' . ($details ? ": {$details}" : ''),
-            500,
+            'Invalid OAuth2.0 configuration' . ($details ? ": {$details}" : ''),
+            Response::HTTP_INTERNAL_SERVER_ERROR,
             'invalid_configuration',
-            'La configuración del cliente OAuth2.0 no es válida'
+            'The OAuth2.0 client configuration is not valid'
         );
     }
 }
