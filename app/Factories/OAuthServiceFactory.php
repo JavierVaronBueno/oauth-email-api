@@ -10,18 +10,20 @@ use App\Exceptions\OAuthException;
 use InvalidArgumentException;
 
 /**
- * Factory para crear instancias de servicios OAuth2.0
+ * Factory for creating OAuth2.0 service instances.
  *
- * Implementa el patrón Factory para crear instancias de servicios OAuth2.0
- * basándose en el proveedor de API especificado en la configuración.
+ * Implements the Factory design pattern to create instances of OAuth2.0 services
+ * based on the API provider specified in the configuration.
  *
- * Esta factory abstrae la creación de objetos complejos y permite
- * una fácil extensión para nuevos proveedores de API.
+ * This factory abstracts the creation of complex objects and allows
+ * for easy extension to support new API providers.
  */
 class OAuthServiceFactory
 {
     /**
-     * Mapeo de proveedores a sus respectivas clases de servicio
+     * Mapping of providers to their respective service classes.
+     *
+     * @var array<string, string>
      */
     private static array $providerServices = [
         LfVendorEmailConfiguration::PROVIDER_MICROSOFT => MicrosoftOAuthService::class,
@@ -29,27 +31,32 @@ class OAuthServiceFactory
     ];
 
     /**
-     * Instancias de servicios en cache para evitar múltiples creaciones
+     * Cached service instances to prevent multiple object creations.
+     *
+     * @var array<string, OAuthServiceInterface>
      */
     private static array $serviceInstances = [];
 
     /**
-     * Crea una instancia del servicio OAuth2.0 basándose en el proveedor
+     * Creates an instance of an OAuth2.0 service based on the provider.
      *
-     * @param string $provider Nombre del proveedor (microsoft o google)
-     * @return OAuthServiceInterface Instancia del servicio OAuth2.0
-     * @throws InvalidArgumentException Si el proveedor no es válido
-     * @throws OAuthException Si no se puede crear el servicio
+     * This method ensures that only one instance of a service is created per provider
+     * by caching previously created instances.
+     *
+     * @param string $provider The name of the provider (e.g., 'microsoft' or 'google').
+     * @return OAuthServiceInterface The OAuth2.0 service instance.
+     * @throws InvalidArgumentException If the provider is not valid.
+     * @throws OAuthException If the service cannot be created or does not implement the required interface.
      */
     public static function create(string $provider): OAuthServiceInterface
     {
         $provider = strtolower(trim($provider));
 
         if (!self::isValidProvider($provider)) {
-            throw new InvalidArgumentException("Proveedor OAuth2.0 no válido: {$provider}");
+            throw new InvalidArgumentException("Invalid OAuth2.0 provider: {$provider}");
         }
 
-        // Retornar instancia cacheada si existe
+        // Return cached instance if it exists
         if (isset(self::$serviceInstances[$provider])) {
             return self::$serviceInstances[$provider];
         }
@@ -59,58 +66,66 @@ class OAuthServiceFactory
             $service = new $serviceClass();
 
             if (!$service instanceof OAuthServiceInterface) {
-                throw new OAuthException("El servicio para {$provider} no implementa OAuthServiceInterface");
+                throw new OAuthException("Service for {$provider} does not implement OAuthServiceInterface");
             }
 
-            // Cachear la instancia para uso futuro
+            // Cache the instance for future use
             self::$serviceInstances[$provider] = $service;
 
             return $service;
         } catch (\Exception $e) {
-            throw new OAuthException("Error al crear el servicio OAuth2.0 para {$provider}: " . $e->getMessage());
+            // Catch any generic exception during service instantiation and re-throw as OAuthException
+            throw new OAuthException("Error creating OAuth2.0 service for {$provider}: " . $e->getMessage(), $e->getCode(), null, null, $e);
         }
     }
 
     /**
-     * Crea una instancia del servicio OAuth2.0 basándose en la configuración
+     * Creates an instance of an OAuth2.0 service based on a configuration model.
      *
-     * @param LfVendorEmailConfiguration $config Configuración del proveedor
-     * @return OAuthServiceInterface Instancia del servicio OAuth2.0
-     * @throws InvalidArgumentException Si la configuración no es válida
-     * @throws OAuthException Si no se puede crear el servicio
+     * Extracts the provider API from the given configuration and delegates to the `create` method.
+     *
+     * @param LfVendorEmailConfiguration $config The vendor email configuration.
+     * @return OAuthServiceInterface The OAuth2.0 service instance.
+     * @throws InvalidArgumentException If the configuration does not specify an API provider.
+     * @throws OAuthException If the service cannot be created.
      */
     public static function createFromConfig(LfVendorEmailConfiguration $config): OAuthServiceInterface
     {
         if (!$config->vec_provider_api) {
-            throw new InvalidArgumentException("La configuración no tiene un proveedor de API especificado");
+            throw new InvalidArgumentException("Configuration does not specify an API provider");
         }
 
         return self::create($config->vec_provider_api);
     }
 
-    /**
-     * Crea una instancia del servicio OAuth2.0 basándose en el UID de configuración
+     /**
+     * Creates an instance of an OAuth2.0 service based on a configuration UID.
      *
-     * @param int $uid Identificador único de la configuración
-     * @return OAuthServiceInterface Instancia del servicio OAuth2.0
-     * @throws InvalidArgumentException Si la configuración no existe
-     * @throws OAuthException Si no se puede crear el servicio
+     * Retrieves the `LfVendorEmailConfiguration` model by its unique identifier
+     * and then delegates to `createFromConfig`.
+     *
+     * @param int $uid The unique identifier of the configuration.
+     * @return OAuthServiceInterface The OAuth2.0 service instance.
+     * @throws InvalidArgumentException If no configuration is found for the given UID.
+     * @throws OAuthException If the service cannot be created.
      */
     public static function createFromUid(int $uid): OAuthServiceInterface
     {
         $config = LfVendorEmailConfiguration::find($uid);
 
         if (!$config) {
-            throw new InvalidArgumentException("No se encontró la configuración con UID: {$uid}");
+            throw new InvalidArgumentException("Configuration with UID: {$uid} not found.");
         }
 
         return self::createFromConfig($config);
     }
 
     /**
-     * Obtiene todos los servicios OAuth2.0 disponibles
+     * Gets all available OAuth2.0 services.
      *
-     * @return array<string, OAuthServiceInterface> Mapa de proveedores a servicios
+     * This method attempts to create and return an instance for each registered provider.
+     *
+     * @return array<string, OAuthServiceInterface> A map of provider names to OAuth2.0 service instances.
      */
     public static function getAllServices(): array
     {
@@ -124,10 +139,10 @@ class OAuthServiceFactory
     }
 
     /**
-     * Verifica si un proveedor es válido
+     * Checks if a given provider is valid.
      *
-     * @param string $provider Nombre del proveedor
-     * @return bool true si el proveedor es válido
+     * @param string $provider The name of the provider.
+     * @return bool True if the provider is valid, false otherwise.
      */
     public static function isValidProvider(string $provider): bool
     {
@@ -135,9 +150,9 @@ class OAuthServiceFactory
     }
 
     /**
-     * Obtiene todos los proveedores disponibles
+     * Gets all available provider names.
      *
-     * @return array Lista de proveedores disponibles
+     * @return array<int, string> A list of available provider names.
      */
     public static function getAvailableProviders(): array
     {
@@ -145,36 +160,41 @@ class OAuthServiceFactory
     }
 
     /**
-     * Registra un nuevo proveedor de servicio OAuth2.0
+     * Registers a new OAuth2.0 service provider with its corresponding class.
      *
-     * @param string $provider Nombre del proveedor
-     * @param string $serviceClass Clase del servicio
-     * @throws InvalidArgumentException Si los parámetros no son válidos
+     * This method allows for dynamic addition of new OAuth providers to the factory.
+     * It validates that the service class exists and implements `OAuthServiceInterface`.
+     *
+     * @param string $provider The name of the provider to register.
+     * @param string $serviceClass The fully qualified class name of the service.
+     * @throws InvalidArgumentException If the provider or service class is invalid.
      */
     public static function registerProvider(string $provider, string $serviceClass): void
     {
         if (empty($provider) || empty($serviceClass)) {
-            throw new InvalidArgumentException("El proveedor y la clase del servicio no pueden estar vacíos");
+            throw new InvalidArgumentException("Provider and service class cannot be empty");
         }
 
         if (!class_exists($serviceClass)) {
-            throw new InvalidArgumentException("La clase del servicio no existe: {$serviceClass}");
+            throw new InvalidArgumentException("Service class does not exist: {$serviceClass}");
         }
 
         if (!is_subclass_of($serviceClass, OAuthServiceInterface::class)) {
-            throw new InvalidArgumentException("La clase del servicio debe implementar OAuthServiceInterface");
+            throw new InvalidArgumentException("Service class must implement OAuthServiceInterface");
         }
 
         self::$providerServices[$provider] = $serviceClass;
 
-        // Limpiar cache si existe
-        unset(self::$serviceInstances[$provider]);
+        // Clear the cache for this specific provider if it exists
+        self::clearCache($provider);
     }
 
     /**
-     * Limpia el cache de instancias de servicios
+     * Clears the cache of service instances.
      *
-     * @param string|null $provider Proveedor específico o null para limpiar todo
+     * This can be used to force the factory to re-instantiate services.
+     *
+     * @param string|null $provider Specific provider to clear, or null to clear all cached instances.
      */
     public static function clearCache(?string $provider = null): void
     {
@@ -186,9 +206,11 @@ class OAuthServiceFactory
     }
 
     /**
-     * Obtiene estadísticas del factory
+     * Gets operational statistics for the factory.
      *
-     * @return array Estadísticas del factory
+     * Provides insights into the number of registered providers and cached service instances.
+     *
+     * @return array<string, mixed> An associative array containing factory statistics.
      */
     public static function getStats(): array
     {
