@@ -9,23 +9,24 @@ use App\Exceptions\OAuthException;
 use App\Exceptions\EmailException;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 
 /**
- * Controlador para la gestión de OAuth2.0 y envío de correos
+ * Controller for OAuth2.0 management and email sending.
  *
- * Maneja la autenticación OAuth2.0 y el envío de correos electrónicos
- * a través de Microsoft Graph API y Google API utilizando el patrón Factory.
+ * Handles OAuth2.0 authentication and email dispatch
+ * through Microsoft Graph API and Google API using the Factory pattern.
  */
 class OAuthEmailController extends Controller
 {
     /**
-     * Obtiene la URL de autorización OAuth2.0 para un proveedor específico
+     * Retrieves the OAuth2.0 authorization URL for a specific provider configuration.
      *
-     * @param Request $request
-     * @return JsonResponse
+     * @param Request $request The incoming HTTP request, expecting 'uid'.
+     * @return JsonResponse A JSON response containing the authorization URL or an error.
      */
     public function getAuthUrl(Request $request): JsonResponse
     {
@@ -37,9 +38,9 @@ class OAuthEmailController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'error' => true,
-                    'message' => 'Datos de entrada inválidos',
+                    'message' => 'Invalid input data',
                     'errors' => $validator->errors()
-                ], 400);
+                ], Response::HTTP_BAD_REQUEST);
             }
 
             $uid = $request->input('uid');
@@ -55,10 +56,10 @@ class OAuthEmailController extends Controller
                     'provider' => $config->vec_provider_api,
                     'uid' => $uid
                 ]
-            ]);
+            ], Response::HTTP_OK);
 
         } catch (OAuthException $e) {
-            Log::error('Error al obtener URL de autorización', [
+            Log::error('Error getting authorization URL', [
                 'uid' => $request->input('uid'),
                 'error' => $e->getMessage()
             ]);
@@ -66,23 +67,24 @@ class OAuthEmailController extends Controller
             return $e->render($request);
 
         } catch (\Exception $e) {
-            Log::error('Error inesperado al obtener URL de autorización', [
+            Log::error('Unexpected error getting authorization URL', [
                 'uid' => $request->input('uid'),
                 'error' => $e->getMessage()
             ]);
 
             return response()->json([
                 'error' => true,
-                'message' => 'Error interno del servidor'
-            ], 500);
+                'message' => 'Internal server errorr'
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
     /**
-     * Maneja el callback de OAuth2.0 y almacena el token
+     * Handles the OAuth2.0 callback, exchanges the authorization code for tokens, and stores them.
      *
-     * @param Request $request
-     * @return JsonResponse
+     * @param int $uid The unique identifier of the configuration provider (from route parameter).
+     * @param Request $request The incoming HTTP request, expecting 'code' and optionally 'state'.
+     * @return JsonResponse A JSON response indicating success or failure of the authentication process.
      */
     public function handleCallback(int $uid, Request $request): JsonResponse
     {
@@ -95,9 +97,9 @@ class OAuthEmailController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'error' => true,
-                    'message' => 'Datos de entrada inválidos',
+                    'message' => 'Invalid input data',
                     'errors' => $validator->errors()
-                ], 400);
+                ], Response::HTTP_BAD_REQUEST);
             }
 
             $code = $request->input('code');
@@ -106,49 +108,51 @@ class OAuthEmailController extends Controller
             $config = LfVendorEmailConfiguration::findOrFail($uid);
             $oauthService = OAuthServiceFactory::createFromConfig($config);
 
-            // Manejar callback y obtener token
+            // Handle callback and obtain token data
             $tokenData = $oauthService->handleCallback($code, $state);
 
-            // Almacenar token en la base de datos
+            // Store token in the database
             $updatedConfig = $oauthService->storeToken($config, $tokenData);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Autenticación completada exitosamente',
+                'message' => 'Authentication completed successfully',
                 'data' => [
                     'provider' => $updatedConfig->vec_provider_api,
                     'user_email' => $updatedConfig->vec_user_email,
                     'expires_at' => $updatedConfig->vec_expires_at->toISOString(),
                     'uid' => $updatedConfig->uid
                 ]
-            ]);
+            ], Response::HTTP_OK);
 
         } catch (OAuthException $e) {
-            Log::error('Error en callback OAuth', [
-                'uid' => $request->input('uid'),
-                'error' => $e->getMessage()
+            Log::error('OAuth callback error', [
+                'uid' => $uid,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return $e->render($request);
 
         } catch (\Exception $e) {
-            Log::error('Error inesperado en callback OAuth', [
+            Log::error('Unexpected error in OAuth callback', [
                 'uid' => $request->input('uid'),
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
                 'error' => true,
-                'message' => 'Error interno del servidor'
-            ], 500);
+                'message' => 'Internal server error'
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
     /**
-     * Envía un correo electrónico utilizando el proveedor configurado
+     * Sends an email using the configured provider.
      *
-     * @param Request $request
-     * @return JsonResponse
+     * @param Request $request The incoming HTTP request, expecting email details and 'uid'.
+     * @return JsonResponse A JSON response indicating the email sending status.
      */
     public function sendEmail(Request $request): JsonResponse
     {
@@ -168,7 +172,7 @@ class OAuthEmailController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'error' => true,
-                    'message' => 'Datos de entrada inválidos',
+                    'message' => 'Invalid input data',
                     'errors' => $validator->errors()
                 ], 400);
             }
@@ -178,7 +182,7 @@ class OAuthEmailController extends Controller
 
             $oauthService = OAuthServiceFactory::createFromConfig($config);
 
-            // Obtener token válido (renovar si es necesario)
+            // Get a valid token (refreshing if necessary)
             $validConfig = $oauthService->getValidToken($config);
 
             $emailData = [
@@ -195,53 +199,56 @@ class OAuthEmailController extends Controller
             if ($sent) {
                 return response()->json([
                     'success' => true,
-                    'message' => 'Correo enviado exitosamente',
+                    'message' => 'Email sent successfully',
                     'data' => [
                         'provider' => $config->vec_provider_api,
                         'to' => $emailData['to'],
                         'subject' => $emailData['subject'],
                         'sent_at' => now()->toISOString()
                     ]
-                ]);
+                ], Response::HTTP_OK);
             } else {
-                throw new EmailException('Error al enviar el correo electrónico');
+                throw new EmailException('Failed to send email.');
             }
 
         } catch (EmailException $e) {
-            Log::error('Error al enviar correo', [
+            Log::error('Error sending email', [
                 'uid' => $request->input('uid'),
                 'to' => $request->input('to'),
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return $e->render($request);
 
         } catch (OAuthException $e) {
-            Log::error('Error de OAuth al enviar correo', [
+            Log::error('OAuth error when sending email', [
                 'uid' => $request->input('uid'),
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return $e->render($request);
 
         } catch (\Exception $e) {
-            Log::error('Error inesperado al enviar correo', [
+            Log::error('Unexpected error sending email', [
                 'uid' => $request->input('uid'),
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'error' => true,
-                'message' => 'Error interno del servidor'
-            ], 500);
+                'message' => 'Internal server error'
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
     /**
-     * Renueva un token de acceso expirado
+     * Refreshes an expired access token for a given configuration.
      *
-     * @param Request $request
-     * @return JsonResponse
+     * @param Request $request The incoming HTTP request, expecting 'uid'.
+     * @return JsonResponse A JSON response indicating the token refresh status.
      */
     public function refreshToken(Request $request): JsonResponse
     {
@@ -253,9 +260,9 @@ class OAuthEmailController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'error' => true,
-                    'message' => 'Datos de entrada inválidos',
+                    'message' => 'Invalid input data',
                     'errors' => $validator->errors()
-                ], 400);
+                ], Response::HTTP_BAD_REQUEST);
             }
 
             $uid = $request->input('uid');
@@ -266,40 +273,42 @@ class OAuthEmailController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Token renovado exitosamente',
+                'message' => 'Token refreshed successfully',
                 'data' => [
                     'provider' => $refreshedConfig->vec_provider_api,
                     'expires_at' => $refreshedConfig->vec_expires_at->toISOString(),
                     'uid' => $refreshedConfig->uid
                 ]
-            ]);
+            ], Response::HTTP_OK);
 
         } catch (OAuthException $e) {
-            Log::error('Error al renovar token', [
+            Log::error('Error refreshing token', [
                 'uid' => $request->input('uid'),
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return $e->render($request);
 
         } catch (\Exception $e) {
-            Log::error('Error inesperado al renovar token', [
+            Log::error('Unexpected error refreshing token', [
                 'uid' => $request->input('uid'),
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'error' => true,
-                'message' => 'Error interno del servidor'
-            ], 500);
+                'message' => 'Internal server error'
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
     /**
-     * Revoca un token de acceso
+     * Revokes an access token for a given configuration.
      *
-     * @param Request $request
-     * @return JsonResponse
+     * @param Request $request The incoming HTTP request, expecting 'uid'.
+     * @return JsonResponse A JSON response indicating the token revocation status.
      */
     public function revokeToken(Request $request): JsonResponse
     {
@@ -311,7 +320,7 @@ class OAuthEmailController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'error' => true,
-                    'message' => 'Datos de entrada inválidos',
+                    'message' => 'Invalid input data',
                     'errors' => $validator->errors()
                 ], 400);
             }
@@ -325,47 +334,48 @@ class OAuthEmailController extends Controller
             if ($revoked) {
                 return response()->json([
                     'success' => true,
-                    'message' => 'Token revocado exitosamente',
+                    'message' => 'Token revoked successfully',
                     'data' => [
                         'provider' => $config->vec_provider_api,
                         'uid' => $uid
                     ]
-                ]);
+                ], Response::HTTP_OK);
             } else {
-                throw new OAuthException('No se pudo revocar el token');
+                throw new OAuthException('Failed to revoke token');
             }
 
         } catch (OAuthException $e) {
-            Log::error('Error al revocar token', [
+            Log::error('Error revoking token', [
                 'uid' => $request->input('uid'),
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return $e->render($request);
 
         } catch (\Exception $e) {
-            Log::error('Error inesperado al revocar token', [
+            Log::error('Unexpected error revoking token', [
                 'uid' => $request->input('uid'),
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'error' => true,
-                'message' => 'Error interno del servidor'
-            ], 500);
+                'message' => 'Internal server error'
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
     /**
-     * Obtiene información del usuario autenticado
+     * Retrieves authenticated user information for a given configuration.
      *
-     * @param Request $request La solicitud HTTP entrante
-     * @return JsonResponse Respuesta en formato JSON con la información del usuario
+     * @param Request $request The incoming HTTP request, expecting 'uid'.
+     * @return JsonResponse A JSON response containing the user information.
      */
     public function getUserInfo(Request $request): JsonResponse
     {
         try {
-            // Validar la entrada
             $validator = Validator::make($request->all(), [
                 'uid' => 'required|integer|exists:lf_vendor_email_configuration,uid',
             ]);
@@ -373,25 +383,25 @@ class OAuthEmailController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'error' => true,
-                    'message' => 'Datos de entrada inválidos',
+                    'message' => 'Invalid input data',
                     'errors' => $validator->errors()
                 ], 400);
             }
 
-            // Obtener el UID y la configuración correspondiente
+            // Get UID and corresponding configuration
             $uid = $request->input('uid');
             $config = LfVendorEmailConfiguration::findOrFail($uid);
 
-            // Crear el servicio OAuth usando la Factory
+            // Create OAuth service using the Factory
             $oauthService = OAuthServiceFactory::createFromConfig($config);
 
-            // Obtener un token válido (refrescando si es necesario)
+            // Get a valid token (refreshing if necessary)
             $validConfig = $oauthService->getValidToken($config);
 
-            // Obtener la información del usuario usando el token de acceso
+            // Get user information using the access token
             $userInfo = $oauthService->getUserInfo($validConfig->vec_access_token);
 
-            // Retornar la respuesta JSON con la información del usuario
+            // Return JSON response with user information
             return response()->json([
                 'success' => true,
                 'data' => [
@@ -399,36 +409,36 @@ class OAuthEmailController extends Controller
                     'user_info' => $userInfo,
                     'uid' => $uid
                 ]
-            ], 200);
+            ], Response::HTTP_OK);
 
         } catch (OAuthException $e) {
-            // Manejar excepciones específicas de OAuth
-            Log::error('Error al obtener información del usuario', [
+            Log::error('Error retrieving user information', [
                 'uid' => $request->input('uid'),
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return $e->render($request);
 
         } catch (\Exception $e) {
-            // Manejar errores inesperados
-            Log::error('Error inesperado al obtener información del usuario', [
+            Log::error('Unexpected error retrieving user information', [
                 'uid' => $request->input('uid'),
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'error' => true,
-                'message' => 'Error interno del servidor'
-            ], 500);
+                'message' => 'Internal server error'
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
     /**
-     * Almacena una nueva configuración para un proveedor de correo electrónico
+     * Stores a new email provider configuration.
      *
-     * @param Request $request La solicitud HTTP entrante
-     * @return JsonResponse Respuesta en formato JSON con la configuración creada
+     * @param Request $request The incoming HTTP request, expecting configuration data.
+     * @return JsonResponse A JSON response with the created configuration details.
      */
     public function storeConfiguration(Request $request): JsonResponse
     {
@@ -447,9 +457,9 @@ class OAuthEmailController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'error' => true,
-                    'message' => 'Datos de entrada inválidos',
+                    'message' => 'Invalid input data',
                     'errors' => $validator->errors()
-                ], 400);
+                ], Response::HTTP_BAD_REQUEST);
             }
 
             $configData = $validator->validated();
@@ -458,7 +468,7 @@ class OAuthEmailController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Configuración almacenada exitosamente',
+                'message' => 'Configuration stored successfully',
                 'data' => [
                     'uid' => $config->uid,
                     'provider' => $config->vec_provider_api,
@@ -468,26 +478,28 @@ class OAuthEmailController extends Controller
                     'tenant_id' => $config->vec_tenant_id,
                     'created_at' => $config->TS_create->toISOString(),
                 ]
-            ], 201);
+            ], Response::HTTP_CREATED);
 
         } catch (OAuthException $e) {
-            Log::error('Error al almacenar configuración', [
+            Log::error('Error storing configuration', [
                 'provider' => $request->input('vec_provider_api'),
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return $e->render($request);
 
         } catch (\Exception $e) {
-            Log::error('Error inesperado al almacenar configuración', [
+            Log::error('Unexpected error storing configuration', [
                 'provider' => $request->input('vec_provider_api'),
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'error' => true,
-                'message' => 'Error interno del servidor'
-            ], 500);
+                'message' => 'Internal server error'
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 }
