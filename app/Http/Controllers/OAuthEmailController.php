@@ -178,7 +178,7 @@ class OAuthEmailController extends Controller
                     'error' => true,
                     'message' => 'Invalid input data',
                     'errors' => $validator->errors()
-                ], 400);
+                ], Response::HTTP_BAD_REQUEST);
             }
 
             $uid = $request->input('uid');
