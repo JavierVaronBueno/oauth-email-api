@@ -315,6 +315,15 @@ class MicrosoftOAuthService implements OAuthServiceInterface
 
     /**
      * {@inheritDoc}
+     * @param array $emailData {
+     * 'to': string,
+     * 'subject': string,
+     * 'content': string,
+     * 'cc'?: string|string[],
+     * 'bcc'?: string|string[],
+     * 'replyTo'?: string,
+     * 'attachments'?: array<array{'path': string, 'name': string, 'mimeType': string}>
+     * }
      */
     public function sendEmail(LfVendorEmailConfiguration $config, array $emailData): bool
     {
@@ -324,10 +333,10 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             // Ensure the token is valid before attempting to send email
             $config = $this->getValidToken($config);
 
-            $message = $this->buildEmailMessage($emailData);
+            $payload = $this->buildEmailPayload($emailData);
 
             $response = Http::withToken($config->vec_access_token)
-                ->post(self::GRAPH_API_URL . '/me/sendMail', $message);
+                ->post(self::GRAPH_API_URL . '/me/sendMail', $payload);
 
             if (!$response->successful()) {
                 $error = $response->json('error');
@@ -526,6 +535,96 @@ class MicrosoftOAuthService implements OAuthServiceInterface
                 }
             }
         }
+
+        // Validate Reply-To if present
+        if (!empty($emailData['replyTo'])) {
+            if (!filter_var($emailData['replyTo'], FILTER_VALIDATE_EMAIL)) {
+                throw EmailException::invalidEmailFormat('replyTo', $emailData['replyTo']);
+            }
+        }
+
+        // Validate attachments if present
+        if (!empty($emailData['attachments'])) {
+            if (!is_array($emailData['attachments'])) {
+                throw new EmailException('Attachments must be an array.');
+            }
+            foreach ($emailData['attachments'] as $attachment) {
+                if (empty($attachment['path']) || !file_exists($attachment['path']) || !is_readable($attachment['path'])) {
+                    throw new EmailException("Attachment file not found or is not readable: " . ($attachment['path'] ?? 'N/A'));
+                }
+                if (empty($attachment['name'])) {
+                    throw new EmailException("Attachment name is required.");
+                }
+                if (empty($attachment['mimeType'])) {
+                    throw new EmailException("Attachment MIME type is required.");
+                }
+            }
+        }
+    }
+
+    /**
+     * Builds the email message payload for Microsoft Graph API.
+     *
+     * This method constructs the array structure required by the `/me/sendMail` endpoint.
+     *
+     * @param array $emailData The email data.
+     * @return array<string, mixed> The formatted email message payload.
+     */
+    private function buildEmailPayload(array $emailData): array
+    {
+        $message = [
+            'message' => [
+                'subject' => $emailData['subject'],
+                'body' => [
+                'contentType' => 'HTML', // Defaulting to HTML
+                'content' => $emailData['content'],
+                ],
+                'toRecipients' => [
+                [
+                    'emailAddress' => [
+                    'address' => $emailData['to'],
+                    ],
+                ],
+                ],
+            ],
+            'saveToSentItems' => true,
+        ];
+
+        // Add CC recipients if present
+        if (!empty($emailData['cc'])) {
+            $ccEmails = is_array($emailData['cc']) ? $emailData['cc'] : [$emailData['cc']];
+            $message['message']['ccRecipients'] = array_map(fn($email) => ['emailAddress' => ['address' => $email]], $ccEmails);
+        }
+
+        // Add BCC recipients if present
+        if (!empty($emailData['bcc'])) {
+            $bccEmails = is_array($emailData['bcc']) ? $emailData['bcc'] : [$emailData['bcc']];
+            $message['message']['bccRecipients'] = array_map(fn($email) => ['emailAddress' => ['address' => $email]], $bccEmails);
+        }
+
+        // Add Reply-To if present
+        if (!empty($emailData['replyTo'])) {
+            $message['message']['replyTo'] = [
+                ['emailAddress' => ['address' => $emailData['replyTo']]]
+            ];
+        }
+
+        // Add attachments if present
+        if (!empty($emailData['attachments'])) {
+            $attachments = [];
+            foreach ($emailData['attachments'] as $file) {
+                $fileContent = file_get_contents($file['path']);
+                $attachments[] = [
+                    '@odata.type' => '#microsoft.graph.fileAttachment',
+                    'name' => $file['name'],
+                    'contentType' => $file['mimeType'],
+                    'contentBytes' => base64_encode($fileContent),
+                ];
+            }
+            $message['message']['attachments'] = $attachments;
+        }
+
+        return $message;
     }
 
     /**
