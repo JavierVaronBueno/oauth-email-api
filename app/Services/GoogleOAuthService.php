@@ -46,6 +46,7 @@ class GoogleOAuthService implements OAuthServiceInterface
      * @var string
      */
     private const GMAIL_SEND_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
+    private const GMAIL_UPLOAD_URL = 'https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send';
 
     /**
      * URL for revoking tokens.
@@ -239,18 +240,37 @@ class GoogleOAuthService implements OAuthServiceInterface
 
     /**
      * {@inheritDoc}
-     */
+     * @param array $emailData {
+     * 'to': string,
+     * 'subject': string,
+     * 'content': string,
+     * 'cc'?: string|string[],
+     * 'bcc'?: string|string[],
+     * 'replyTo'?: string,
+     * 'attachments'?: array<array{'path': string, 'name': string, 'mimeType': string}>
+     * }
+     */
     public function sendEmail(LfVendorEmailConfiguration $config, array $emailData): bool
     {
         $this->validateEmailData($emailData);
 
         try {
             $message = $this->createEmailMessage($emailData);
+            $hasAttachments = !empty($emailData['attachments']);
 
-            $response = Http::withToken($config->vec_access_token)
-                ->post(self::GMAIL_SEND_URL, [
-                    'raw' => base64_encode($message)
-                ]);
+            // Use the upload endpoint for messages with attachments (multipart)
+            $url = $hasAttachments ? self::GMAIL_UPLOAD_URL : self::GMAIL_SEND_URL;
+
+            $request = Http::withToken($config->vec_access_token);
+
+            if ($hasAttachments) {
+                // For uploads, the raw message must be sent as the body with the correct content type.
+                $response = $request->withBody($message, 'message/rfc822')
+                                    ->post($url);
+            } else {
+                // For simple messages, send it as a JSON payload.
+                $response = $request->post($url, ['raw' => rtrim(strtr(base64_encode($message), '+/', '-_'), '=')]);
+            }
 
             if (!$response->successful()) {
                 $error = $response->json();
@@ -424,6 +444,31 @@ class GoogleOAuthService implements OAuthServiceInterface
                 }
             }
         }
+
+         // Validate Reply-To if present
+        if (!empty($emailData['replyTo'])) {
+            if (!filter_var($emailData['replyTo'], FILTER_VALIDATE_EMAIL)) {
+                throw EmailException::invalidEmailFormat('replyTo', $emailData['replyTo']);
+            }
+        }
+
+        // Validate attachments if present
+        if (!empty($emailData['attachments'])) {
+            if (!is_array($emailData['attachments'])) {
+                throw new EmailException('Attachments must be an array.');
+            }
+            foreach ($emailData['attachments'] as $attachment) {
+                if (empty($attachment['path']) || !file_exists($attachment['path']) || !is_readable($attachment['path'])) {
+                    throw new EmailException("Attachment file not found or is not readable: " . ($attachment['path'] ?? 'N/A'));
+                }
+                if (empty($attachment['name'])) {
+                    throw new EmailException("Attachment name is required.");
+                }
+                if (empty($attachment['mimeType'])) {
+                    throw new EmailException("Attachment MIME type is required.");
+                }
+            }
+        }
     }
 
     /**
@@ -436,8 +481,15 @@ class GoogleOAuthService implements OAuthServiceInterface
      */
     private function createEmailMessage(array $emailData): string
     {
+        $hasAttachments = !empty($emailData['attachments']);
+
+        // Main headers
         $message = "To: {$emailData['to']}\r\n";
         $message .= "Subject: {$emailData['subject']}\r\n";
+
+        if (!empty($emailData['replyTo'])) {
+            $message .= "Reply-To: {$emailData['replyTo']}\r\n";
+        }
 
         if (!empty($emailData['cc'])) {
             $cc = is_array($emailData['cc']) ? implode(', ', $emailData['cc']) : $emailData['cc'];
@@ -449,9 +501,40 @@ class GoogleOAuthService implements OAuthServiceInterface
             $message .= "Bcc: {$bcc}\r\n";
         }
 
-        $message .= "Content-Type: text/html; charset=UTF-8\r\n";
-        $message .= "Content-Transfer-Encoding: quoted-printable\r\n\r\n";
-        $message .= quoted_printable_encode($emailData['content']) . "\r\n";
+        // If there are attachments, we need a multipart message.
+        if ($hasAttachments) {
+            $boundary = 'boundary_' . uniqid();
+            $message .= "MIME-Version: 1.0\r\n";
+            $message .= "Content-Type: multipart/mixed; boundary=\"{$boundary}\"\r\n\r\n";
+
+            // Message body part
+            $message .= "--{$boundary}\r\n";
+            $message .= "Content-Type: text/html; charset=UTF-8\r\n";
+            $message .= "Content-Transfer-Encoding: quoted-printable\r\n\r\n";
+            $message .= quoted_printable_encode($emailData['content']) . "\r\n\r\n";
+
+            // Attachments part
+            foreach ($emailData['attachments'] as $attachment) {
+                $filePath = $attachment['path'];
+                $fileName = $attachment['name'];
+                $mimeType = $attachment['mimeType'];
+                $fileContent = file_get_contents($filePath);
+                $encodedContent = chunk_split(base64_encode($fileContent));
+
+                $message .= "--{$boundary}\r\n";
+                $message .= "Content-Type: {$mimeType}; name=\"{$fileName}\"\r\n";
+                $message .= "Content-Transfer-Encoding: base64\r\n";
+                $message .= "Content-Disposition: attachment; filename=\"{$fileName}\"\r\n\r\n";
+                $message .= $encodedContent . "\r\n";
+            }
+
+            $message .= "--{$boundary}--";
+        } else {
+            // Simple message without attachments
+            $message .= "Content-Type: text/html; charset=UTF-8\r\n";
+            $message .= "Content-Transfer-Encoding: quoted-printable\r\n\r\n";
+            $message .= quoted_printable_encode($emailData['content']);
+        }
 
         return $message;
     }

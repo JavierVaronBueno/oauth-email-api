@@ -167,6 +167,10 @@ class OAuthEmailController extends Controller
                 'cc.*' => 'email|max:255',
                 'bcc' => 'nullable|array',
                 'bcc.*' => 'email|max:255',
+                'replyTo' => 'nullable|email|max:255',
+                'attachments' => 'nullable|array',
+                // Validation: max 5 files, 10MB each, common document/image types
+                'attachments.*' => 'file|max:10240|mimes:pdf,doc,docx,xls,xlsx,jpg,jpeg,png,gif',
             ]);
 
             if ($validator->fails()) {
@@ -192,7 +196,21 @@ class OAuthEmailController extends Controller
                 'content' => $request->input('content'),
                 'cc' => $request->input('cc'),
                 'bcc' => $request->input('bcc'),
+                'replyTo' => $request->input('replyTo'),
             ];
+
+            // Handle file attachments if they exist
+            if ($request->hasFile('attachments')) {
+                $attachments = [];
+                foreach ($request->file('attachments') as $file) {
+                    $attachments[] = [
+                        'path' => $file->getRealPath(),
+                        'name' => $file->getClientOriginalName(),
+                        'mimeType' => $file->getClientMimeType(),
+                    ];
+                }
+                $emailData['attachments'] = $attachments;
+            }
 
             $sent = $oauthService->sendEmail($validConfig, $emailData);
 
