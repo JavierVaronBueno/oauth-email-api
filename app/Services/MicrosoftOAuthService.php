@@ -8,6 +8,7 @@ use App\Exceptions\OAuthException;
 use App\Models\LfVendorEmailConfiguration;
 use Carbon\Carbon;
 use Exception;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -175,6 +176,8 @@ class MicrosoftOAuthService implements OAuthServiceInterface
         } catch (Exception $e) {
             Log::error('Error in Microsoft OAuth callback processing', [
                 'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
                 'code_received' => $code,
                 'state_received' => $state,
                 'trace' => $e->getTraceAsString(),
@@ -200,6 +203,7 @@ class MicrosoftOAuthService implements OAuthServiceInterface
     public function storeToken(LfVendorEmailConfiguration $config, array $tokenData): LfVendorEmailConfiguration
     {
         try {
+            DB::beginTransaction();
             $config->update([
                 'vec_access_token' => $tokenData['access_token'],
                 'vec_refresh_token' => $tokenData['refresh_token'] ?? null,
@@ -207,6 +211,7 @@ class MicrosoftOAuthService implements OAuthServiceInterface
                 'vec_expires_at' => Carbon::now()->addSeconds($tokenData['expires_in']),
                 'vec_user_email' => $tokenData['user_info']['mail'] ?? $tokenData['user_info']['userPrincipalName'],
             ]);
+            DB::commit();
 
             Log::info('Microsoft token stored successfully', [
                 'config_id' => $config->uid,
@@ -216,9 +221,12 @@ class MicrosoftOAuthService implements OAuthServiceInterface
 
             return $config->fresh();
         } catch (Exception $e) {
+            DB::rollBack();
             Log::error('Error storing Microsoft token', [
                 'config_id' => $config->uid,
                 'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
                 'token_data_keys' => array_keys($tokenData), // Log keys to avoid sensitive data
                 'trace' => $e->getTraceAsString(),
             ]);
@@ -277,13 +285,14 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             }
 
             $tokenData = $response->json();
-
+            DB::beginTransaction();
             $config->update([
                 'vec_access_token' => $tokenData['access_token'],
                 'vec_refresh_token' => $tokenData['refresh_token'] ?? $config->vec_refresh_token,
                 'vec_expires_in' => $tokenData['expires_in'],
                 'vec_expires_at' => Carbon::now()->addSeconds($tokenData['expires_in']),
             ]);
+            DB::commit();
 
             Log::info('Microsoft token refreshed successfully', [
                 'config_id' => $config->uid,
@@ -293,9 +302,12 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             return $config->fresh();
 
         } catch (Exception $e) {
+            DB::rollBack();
             Log::error('Error refreshing Microsoft token', [
                 'config_id' => $config->uid,
                 'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString(),
             ]);
 
@@ -360,6 +372,8 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             Log::error('General error sending Microsoft email', [
                 'config_id' => $config->uid,
                 'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
                 'email_data' => $emailData,
                 'trace' => $e->getTraceAsString(),
             ]);
@@ -402,6 +416,8 @@ class MicrosoftOAuthService implements OAuthServiceInterface
         } catch (Exception $e) {
             Log::error('Error retrieving Microsoft user info', [
                 'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString(),
             ]);
 
@@ -445,9 +461,11 @@ class MicrosoftOAuthService implements OAuthServiceInterface
     public function revokeToken(LfVendorEmailConfiguration $config): bool
     {
         try {
-            // Microsoft Graph does not have a specific public endpoint to revoke tokens
-            // directly via an API call for user-delegated permissions.
-            // The common approach is to clear the tokens from the application's side.
+            /**
+             * NOTE: Microsoft Graph does not have a specific public endpoint to revoke tokens
+             * directly via an API call for user-delegated permissions.
+             * The common approach is to clear the tokens from the application's side.
+             */
             $config->update([
                 'vec_access_token' => null,
                 'vec_refresh_token' => null,
@@ -465,6 +483,8 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             Log::error('Error clearing Microsoft token from configuration', [
                 'config_id' => $config->uid,
                 'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString()
             ]);
 
@@ -499,51 +519,24 @@ class MicrosoftOAuthService implements OAuthServiceInterface
      */
     private function validateEmailData(array $emailData): void
     {
-        if (empty($emailData['to'])) {
-            throw EmailException::invalidRecipient('', 'Microsoft Graph');
-        }
+        $provider = $this->getProviderName();
+        if (empty($emailData['to'])) throw EmailException::invalidRecipient('', $provider);
+        if (empty($emailData['subject'])) throw EmailException::emptySubject($provider);
+        if (empty($emailData['content'])) throw EmailException::emptyContent($provider);
 
-        if (empty($emailData['subject'])) {
-            throw EmailException::emptySubject('Microsoft Graph');
-        }
-
-        if (empty($emailData['content'])) {
-            throw EmailException::emptyContent('Microsoft Graph');
-        }
-
-        // Validate 'to' email format
-        if (!filter_var($emailData['to'], FILTER_VALIDATE_EMAIL)) {
-            throw EmailException::invalidEmailFormat('to', $emailData['to']);
-        }
-
-        // Validate CC emails if present
-        if (!empty($emailData['cc'])) {
-            $ccEmails = is_array($emailData['cc']) ? $emailData['cc'] : [$emailData['cc']];
-            foreach ($ccEmails as $email) {
-                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                    throw EmailException::invalidEmailFormat('cc', $email);
+        $validate = function ($emails, $field) {
+            foreach ((array)$emails as $email) {
+                if (!filter_var(trim($email), FILTER_VALIDATE_EMAIL)) {
+                    throw EmailException::invalidEmailFormat($field, $email);
                 }
             }
-        }
+        };
 
-        // Validate BCC emails if present
-        if (!empty($emailData['bcc'])) {
-            $bccEmails = is_array($emailData['bcc']) ? $emailData['bcc'] : [$emailData['bcc']];
-            foreach ($bccEmails as $email) {
-                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                    throw EmailException::invalidEmailFormat('bcc', $email);
-                }
-            }
-        }
+        $validate($emailData['to'], 'to');
+        if (!empty($emailData['cc'])) $validate($emailData['cc'], 'cc');
+        if (!empty($emailData['bcc'])) $validate($emailData['bcc'], 'bcc');
+        if (!empty($emailData['replyTo'])) $validate($emailData['replyTo'], 'replyTo');
 
-        // Validate Reply-To if present
-        if (!empty($emailData['replyTo'])) {
-            if (!filter_var($emailData['replyTo'], FILTER_VALIDATE_EMAIL)) {
-                throw EmailException::invalidEmailFormat('replyTo', $emailData['replyTo']);
-            }
-        }
-
-        // Validate attachments if present
         if (!empty($emailData['attachments'])) {
             if (!is_array($emailData['attachments'])) {
                 throw new EmailException('Attachments must be an array.');
@@ -628,62 +621,6 @@ class MicrosoftOAuthService implements OAuthServiceInterface
     }
 
     /**
-     * Builds the email message payload for Microsoft Graph API.
-     *
-     * This method constructs the array structure required by the `/me/sendMail` endpoint.
-     *
-     * @param array $emailData The email data (to, subject, content, cc, bcc, content_type, to_name).
-     * @return array<string, mixed> The formatted email message payload.
-     */
-    private function buildEmailMessage(array $emailData): array
-    {
-        $message = [
-            'message' => [
-                'subject' => $emailData['subject'],
-                'body' => [
-                    'contentType' => $emailData['content_type'] ?? 'HTML',
-                    'content' => $emailData['content'],
-                ],
-                'toRecipients' => [
-                    [
-                        'emailAddress' => [
-                            'address' => $emailData['to'],
-                            'name' => $emailData['to_name'] ?? null,
-                        ],
-                    ],
-                ],
-            ],
-            'saveToSentItems' => true, // Default to saving to sent items
-        ];
-
-        // Add CC recipients if present
-        if (!empty($emailData['cc'])) {
-            $ccEmails = is_array($emailData['cc']) ? $emailData['cc'] : [$emailData['cc']];
-            $message['message']['ccRecipients'] = array_map(function ($email) {
-                return [
-                    'emailAddress' => [
-                        'address' => $email,
-                    ],
-                ];
-            }, $ccEmails);
-        }
-
-        // Add BCC recipients if present
-        if (!empty($emailData['bcc'])) {
-            $bccEmails = is_array($emailData['bcc']) ? $emailData['bcc'] : [$emailData['bcc']];
-            $message['message']['bccRecipients'] = array_map(function ($email) {
-                return [
-                    'emailAddress' => [
-                        'address' => $email,
-                    ],
-                ];
-            }, $bccEmails);
-        }
-
-        return $message;
-    }
-
-    /**
      * {@inheritDoc}
      */
     public function storeConfiguration(array $configData): LfVendorEmailConfiguration
@@ -691,7 +628,7 @@ class MicrosoftOAuthService implements OAuthServiceInterface
         try {
             // Validate configuration data before creation
             $this->validateConfigurationData($configData);
-
+            DB::beginTransaction();
             // Create new configuration
             $config = LfVendorEmailConfiguration::create([
                 'vec_vendor_id' => $configData['vec_vendor_id'],
@@ -703,7 +640,7 @@ class MicrosoftOAuthService implements OAuthServiceInterface
                 'vec_redirect_uri' => $configData['vec_redirect_uri'],
                 'vec_tenant_id' => $configData['vec_tenant_id'] ?? 'common',
             ]);
-
+            DB::commit();
             Log::info('Microsoft configuration stored successfully', [
                 'uid' => $config->uid,
                 'vendor_id' => $config->vec_vendor_id,
@@ -714,8 +651,11 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             return $config;
 
         } catch (\Exception $e) {
+            DB::rollBack();
             Log::error('Error storing Microsoft configuration', [
                 'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
                 'config_data' => $configData,
                 'trace' => $e->getTraceAsString(),
             ]);
