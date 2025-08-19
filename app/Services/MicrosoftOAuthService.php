@@ -76,6 +76,10 @@ class MicrosoftOAuthService implements OAuthServiceInterface
     {
         $config = LfVendorEmailConfiguration::findOrFail($uid);
 
+        if (!$config->vec_client_id || !$config->vec_redirect_uri || !$config->vec_tenant_id) {
+            throw OAuthException::invalidConfiguration('Configuration not found for UID: ' . $uid);
+        }
+
         if ($config->vec_provider_api !== LfVendorEmailConfiguration::PROVIDER_MICROSOFT) {
             throw OAuthException::invalidConfiguration('Configuration is not for Microsoft Graph.');
         }
@@ -132,10 +136,10 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             $uid = $stateData['uid'];
         }
 
-        $config = LfVendorEmailConfiguration::find($uid);
+        $config = LfVendorEmailConfiguration::findOrFail($uid);
 
-        if (!$config) {
-            throw OAuthException::invalidConfiguration('Configuration not found for callback processing.');
+        if (!$config->vec_client_id || !$config->vec_client_secret || !$config->vec_redirect_uri || !$config->vec_tenant_id) {
+            throw OAuthException::invalidConfiguration('Configuration not found for callback processing for UID: ' . $uid);
         }
 
         try {
