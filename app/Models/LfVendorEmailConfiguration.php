@@ -164,6 +164,36 @@ class LfVendorEmailConfiguration extends Model
     }
 
     /**
+     * Checks if the access refresh token is not null.
+     *
+     * @return bool True if the token is not null, false otherwise.
+     */
+    public function isNotNullRefreshToken(): bool
+    {
+        return $this->vec_refresh_token !== null;
+    }
+
+    /**
+     * Checks if the expires_at is not null.
+     *
+     * @return bool True if the expires_at is not null, false otherwise.
+     */
+    public function isNotNullExpiresAt(): bool
+    {
+        return $this->vec_expires_at !== null;
+    }
+
+    /**
+     * Checks if the access token is not null.
+     *
+     * @return bool True if the access token is not null, false otherwise.
+     */
+    public function isNotNullAccessToken(): bool
+    {
+        return $this->vec_access_token !== null;
+    }
+
+    /**
      * Checks if the token is expiring soon (within the next 5 minutes).
      *
      * @return bool True if the token is expiring soon, false otherwise.
@@ -216,6 +246,21 @@ class LfVendorEmailConfiguration extends Model
             'vec_refresh_token' => $tokenData['refresh_token'] ?? $this->vec_refresh_token,
             'vec_expires_in' => $tokenData['expires_in'],
             'vec_expires_at' => Carbon::now()->addSeconds($tokenData['expires_in']),
+        ]);
+    }
+
+    /**
+     * Updates information for revoked tokens.
+     *
+     * @return bool True if the update was successful, false otherwise.
+     */
+    public function updateRevokeToken(): bool
+    {
+        return $this->update([
+            'vec_access_token' => null,
+            'vec_refresh_token' => null,
+            'vec_expires_in' => 0,
+            'vec_expires_at' => null,
         ]);
     }
 
