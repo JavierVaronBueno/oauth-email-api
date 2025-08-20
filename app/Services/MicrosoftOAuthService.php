@@ -673,7 +673,7 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             if ($e instanceof OAuthException) {
                 throw $e;
             }
-            
+
             throw new OAuthException('Error storing Microsoft configuration: ' . $e->getMessage());
         }
     }
