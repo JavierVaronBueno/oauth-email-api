@@ -425,6 +425,11 @@ class MicrosoftOAuthService implements OAuthServiceInterface
                 'trace' => $e->getTraceAsString(),
             ]);
 
+            // Re-throw if it's already an OAuthException, otherwise wrap it
+            if ($e instanceof OAuthException) {
+                throw $e;
+            }
+
             throw new OAuthException(
                 'Error retrieving user information: ' . $e->getMessage(),
                 $e->getCode(),
@@ -663,6 +668,12 @@ class MicrosoftOAuthService implements OAuthServiceInterface
                 'config_data' => $configData,
                 'trace' => $e->getTraceAsString(),
             ]);
+
+            // Re-throw if it's already an OAuthException, otherwise wrap it
+            if ($e instanceof OAuthException) {
+                throw $e;
+            }
+            
             throw new OAuthException('Error storing Microsoft configuration: ' . $e->getMessage());
         }
     }

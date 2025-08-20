@@ -166,6 +166,7 @@ class GoogleOAuthService implements OAuthServiceInterface
             if ($e instanceof OAuthException) {
                 throw $e;
             }
+            
             throw new OAuthException('Error processing Google callback: ' . $e->getMessage());
         }
     }
@@ -278,7 +279,7 @@ class GoogleOAuthService implements OAuthServiceInterface
             if ($e instanceof OAuthException) {
                 throw $e;
             }
-            
+
             throw new OAuthException(
                 'Error refreshing Google token: ' . $e->getMessage(),
                 $e->getCode(),
