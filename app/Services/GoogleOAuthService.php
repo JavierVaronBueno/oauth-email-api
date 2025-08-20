@@ -9,6 +9,8 @@ use App\Exceptions\EmailException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
+use Exception;
+use Illuminate\Support\Facades\DB;
 
 /**
  * OAuth2.0 Service for Google API.
@@ -46,6 +48,12 @@ class GoogleOAuthService implements OAuthServiceInterface
      * @var string
      */
     private const GMAIL_SEND_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
+
+    /**
+     * URL for sending complex emails via Gmail API.
+     *
+     * @var string
+     */
     private const GMAIL_UPLOAD_URL = 'https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send';
 
     /**
@@ -71,9 +79,9 @@ class GoogleOAuthService implements OAuthServiceInterface
      */
     public function getAuthUrl(int $uid): string
     {
-        $config = LfVendorEmailConfiguration::find($uid);
+        $config = LfVendorEmailConfiguration::findOrFail($uid);
 
-        if (!$config) {
+        if (!$config->vec_client_id || !$config->vec_redirect_uri) {
             throw OAuthException::invalidConfiguration('Configuration not found for UID: ' . $uid);
         }
 
@@ -112,10 +120,10 @@ class GoogleOAuthService implements OAuthServiceInterface
             $uid = $stateData['uid'];
         }
 
-        $config = LfVendorEmailConfiguration::find($uid);
+        $config = LfVendorEmailConfiguration::findOrFail($uid);
 
-        if (!$config) {
-            throw OAuthException::invalidConfiguration('Configuration not found');
+        if (!$config->vec_client_id || !$config->vec_client_secret || !$config->vec_redirect_uri) {
+            throw OAuthException::invalidConfiguration('Configuration not found for callback processing for UID: ' . $uid);
         }
 
         try {
@@ -144,7 +152,17 @@ class GoogleOAuthService implements OAuthServiceInterface
 
             return $tokenData;
 
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
+            Log::error('Error in Google OAuth callback processing', [
+                'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'code_received' => $code,
+                'state_received' => $state,
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            // Re-throw if it's already an OAuthException, otherwise wrap it
             if ($e instanceof OAuthException) {
                 throw $e;
             }
@@ -158,6 +176,7 @@ class GoogleOAuthService implements OAuthServiceInterface
     public function storeToken(LfVendorEmailConfiguration $config, array $tokenData): LfVendorEmailConfiguration
     {
         try {
+            DB::beginTransaction();
             $config->update([
                 'vec_access_token' => $tokenData['access_token'],
                 'vec_refresh_token' => $tokenData['refresh_token'] ?? $config->vec_refresh_token,
@@ -166,9 +185,20 @@ class GoogleOAuthService implements OAuthServiceInterface
                 'vec_user_email' => $tokenData['user_info']['email'] ?? null,
             ]);
 
+            DB::commit();
+
             return $config->fresh();
 
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
+            DB::rollBack();
+            Log::error('Error storing Google token', [
+                'config_id' => $config->uid,
+                'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'token_data_keys' => array_keys($tokenData), // Log keys to avoid sensitive data
+                'trace' => $e->getTraceAsString(),
+            ]);
             throw new OAuthException('Error storing Google token: ' . $e->getMessage(), $e->getCode(), null, null, $e);
         }
     }
@@ -179,13 +209,13 @@ class GoogleOAuthService implements OAuthServiceInterface
     public function getValidToken(LfVendorEmailConfiguration $config, ?string $email = null): LfVendorEmailConfiguration
     {
         if (!$config->vec_access_token) {
-            throw OAuthException::invalidToken('Google');
+            throw OAuthException::invalidToken($this->getProviderName());
         }
 
         // If the token is expired or close to expiring, attempt to refresh it
         if ($config->isTokenExpired() || $config->isTokenExpiringSoon()) {
             if (!$config->vec_refresh_token) {
-                throw OAuthException::noRefreshToken('Google');
+                throw OAuthException::noRefreshToken($this->getProviderName());
             }
             return $this->refreshToken($config);
         }
@@ -199,11 +229,11 @@ class GoogleOAuthService implements OAuthServiceInterface
     public function refreshToken(LfVendorEmailConfiguration $config): LfVendorEmailConfiguration
     {
         if (!$config->vec_refresh_token) {
-            throw OAuthException::noRefreshToken('Google');
+            throw OAuthException::noRefreshToken($this->getProviderName());
         }
 
         try {
-            $response = Http::post(self::TOKEN_URL, [
+            $response = Http::asForm()->post(self::TOKEN_URL, [
                 'client_id' => $config->vec_client_id,
                 'client_secret' => $config->vec_client_secret,
                 'refresh_token' => $config->vec_refresh_token,
@@ -221,6 +251,8 @@ class GoogleOAuthService implements OAuthServiceInterface
 
             $tokenData = $response->json();
 
+            DB::beginTransaction();
+
             $config->update([
                 'vec_access_token' => $tokenData['access_token'],
                 'vec_expires_in' => $tokenData['expires_in'],
@@ -228,13 +260,32 @@ class GoogleOAuthService implements OAuthServiceInterface
                 'vec_refresh_token' => $tokenData['refresh_token'] ?? $config->vec_refresh_token,
             ]);
 
+            DB::commit();
+
             return $config->fresh();
 
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
+            DB::rollBack();
+            Log::error('Error refreshing Google token', [
+                'config_id' => $config->uid,
+                'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            // Re-throw if it's already an OAuthException, otherwise wrap it
             if ($e instanceof OAuthException) {
                 throw $e;
             }
-            throw new OAuthException('Error refreshing Google token: ' . $e->getMessage(), $e->getCode(), null, null, $e);
+            
+            throw new OAuthException(
+                'Error refreshing Google token: ' . $e->getMessage(),
+                $e->getCode(),
+                null,
+                null,
+                $e
+            );
         }
     }
 
@@ -255,7 +306,10 @@ class GoogleOAuthService implements OAuthServiceInterface
         $this->validateEmailData($emailData);
 
         try {
-            $message = $this->createEmailMessage($emailData);
+           // Ensure the token is valid before attempting to send email
+            $config = $this->getValidToken($config);
+
+            $message = $this->buildEmailMessage($emailData);
             $hasAttachments = !empty($emailData['attachments']);
 
             // Use the upload endpoint for messages with attachments (multipart)
@@ -266,10 +320,12 @@ class GoogleOAuthService implements OAuthServiceInterface
             if ($hasAttachments) {
                 // For uploads, the raw message must be sent as the body with the correct content type.
                 $response = $request->withBody($message, 'message/rfc822')
-                                    ->post($url);
+                    ->withHeaders(['Content-Type' => 'multipart/form-data'])
+                    ->post($url);
             } else {
                 // For simple messages, send it as a JSON payload.
-                $response = $request->post($url, ['raw' => rtrim(strtr(base64_encode($message), '+/', '-_'), '=')]);
+                $response = $request->withHeaders(['Content-Type' => 'application/json'])
+                    ->post($url, ['raw' => rtrim(strtr(base64_encode($message), '+/', '-_'), '=')]);
             }
 
             if (!$response->successful()) {
@@ -288,11 +344,28 @@ class GoogleOAuthService implements OAuthServiceInterface
 
             return true;
 
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
+            Log::error('General error sending Google email', [
+                'config_id' => $config->uid,
+                'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'email_data' => $emailData,
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            // Re-throw if it's already an EmailException, otherwise wrap it
             if ($e instanceof EmailException) {
                 throw $e;
             }
-            throw EmailException::networkError('Google Gmail', $e->getMessage());
+
+            throw new EmailException(
+                'Error sending email with Google: ' . $e->getMessage(),
+                $e->getCode(),
+                'send_error',
+                $emailData,
+                $e
+            );
         }
     }
 
@@ -306,17 +379,37 @@ class GoogleOAuthService implements OAuthServiceInterface
                 ->get(self::USER_INFO_URL);
 
             if (!$response->successful()) {
+                $responseData = $response->json();
+
                 throw new OAuthException(
-                    'Error retrieving user information from Google: ' . ($error['error']['message'] ?? 'Unknown error'),
+                    'Error retrieving user information from Google: ' . ($responseData['error']['message'] ?? 'Unknown error'),
                     $response->status(),
-                    $error['error']['code'] ?? 'user_info_failed'
+                    $responseData['error']['code'] ?? 'user_info_failed'
                 );
             }
 
             return $response->json();
 
-        } catch (\Exception $e) {
-            throw new OAuthException('Error retrieving user information: ' . $e->getMessage(), $e->getCode(), null, null, $e);
+        } catch (Exception $e) {
+            Log::error('Error retrieving Google user info', [
+                'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            // Re-throw if it's already an OAuthException, otherwise wrap it
+            if ($e instanceof OAuthException) {
+                throw $e;
+            }
+
+            throw new OAuthException(
+                'Error retrieving user information: ' . $e->getMessage(),
+                $e->getCode(),
+                null,
+                null,
+                $e
+            );
         }
     }
 
@@ -364,22 +457,28 @@ class GoogleOAuthService implements OAuthServiceInterface
                 $config->update([
                     'vec_access_token' => null,
                     'vec_refresh_token' => null,
-                    'vec_expires_at' => null,
                     'vec_expires_in' => 0,
+                    'vec_expires_at' => null,
                 ]);
-
                 Log::info('Google token revoked successfully for UID: ' . $config->uid);
                 return true;
             }
-
             Log::error('Failed to revoke Google token for UID: ' . $config->uid, [
                 'response_status' => $response->status(),
                 'response_body' => $response->body(),
             ]);
             return false;
 
-        } catch (\Exception $e) {
-            throw new OAuthException('Error revoking Google token: ' . $e->getMessage(), $e->getCode(), null, null, $e);
+        } catch (Exception $e) {
+            Log::error('Error clearing Google token from configuration', [
+                'config_id' => $config->uid,
+                'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return false;
         }
     }
 
@@ -409,50 +508,24 @@ class GoogleOAuthService implements OAuthServiceInterface
      */
     private function validateEmailData(array $emailData): void
     {
-        if (empty($emailData['to'])) {
-            throw EmailException::invalidRecipient('', 'Google Gmail');
-        }
+        if (empty($emailData['to'])) throw EmailException::invalidRecipient('', 'Google Gmail');
+        if (!filter_var($emailData['to'], FILTER_VALIDATE_EMAIL)) throw EmailException::invalidRecipient($emailData['to'], 'Google Gmail');
+        if (empty($emailData['subject'])) throw EmailException::emptySubject('Google Gmail');
+        if (empty($emailData['content'])) throw EmailException::emptyContent('Google Gmail');
 
-        if (!filter_var($emailData['to'], FILTER_VALIDATE_EMAIL)) {
-            throw EmailException::invalidRecipient($emailData['to'], 'Google Gmail');
-        }
-
-        if (empty($emailData['subject'])) {
-            throw EmailException::emptySubject('Google Gmail');
-        }
-
-        if (empty($emailData['content'])) {
-            throw EmailException::emptyContent('Google Gmail');
-        }
-
-        // Validate CC if present
-        if (!empty($emailData['cc'])) {
-            $ccEmails = is_array($emailData['cc']) ? $emailData['cc'] : [$emailData['cc']];
-            foreach ($ccEmails as $ccEmail) {
-                if (!filter_var($ccEmail, FILTER_VALIDATE_EMAIL)) {
-                    throw EmailException::invalidEmailFormat('cc', $ccEmail);
+        $validateEmails = function ($emails, $field) {
+            $emails = is_array($emails) ? $emails : [$emails];
+            foreach ($emails as $email) {
+                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    throw EmailException::invalidEmailFormat($field, $email);
                 }
             }
-        }
+        };
 
-        // Validate BCC if present
-        if (!empty($emailData['bcc'])) {
-            $bccEmails = is_array($emailData['bcc']) ? $emailData['bcc'] : [$emailData['bcc']];
-            foreach ($bccEmails as $bccEmail) {
-                if (!filter_var($bccEmail, FILTER_VALIDATE_EMAIL)) {
-                    throw EmailException::invalidEmailFormat('bcc', $bccEmail);
-                }
-            }
-        }
+        if (!empty($emailData['cc'])) $validateEmails($emailData['cc'], 'cc');
+        if (!empty($emailData['bcc'])) $validateEmails($emailData['bcc'], 'bcc');
+        if (!empty($emailData['replyTo'])) $validateEmails($emailData['replyTo'], 'replyTo');
 
-         // Validate Reply-To if present
-        if (!empty($emailData['replyTo'])) {
-            if (!filter_var($emailData['replyTo'], FILTER_VALIDATE_EMAIL)) {
-                throw EmailException::invalidEmailFormat('replyTo', $emailData['replyTo']);
-            }
-        }
-
-        // Validate attachments if present
         if (!empty($emailData['attachments'])) {
             if (!is_array($emailData['attachments'])) {
                 throw new EmailException('Attachments must be an array.');
@@ -476,10 +549,10 @@ class GoogleOAuthService implements OAuthServiceInterface
      *
      * This format is required by the Gmail API's `messages.send` endpoint.
      *
-     * @param array $emailData The email data (to, subject, content, cc, bcc).
+     * @param array $emailData The email data (to, subject, content, cc, bcc, replyTo, attachments).
      * @return string The formatted email message.
      */
-    private function createEmailMessage(array $emailData): string
+    private function buildEmailMessage(array $emailData): string
     {
         $hasAttachments = !empty($emailData['attachments']);
 
@@ -548,6 +621,7 @@ class GoogleOAuthService implements OAuthServiceInterface
             // Validar datos de configuración
             $this->validateConfigurationData($configData);
 
+            DB::beginTransaction();
             // Crear nueva configuración
             $config = LfVendorEmailConfiguration::create([
                 'vec_vendor_id' => $configData['vec_vendor_id'],
@@ -558,7 +632,7 @@ class GoogleOAuthService implements OAuthServiceInterface
                 'vec_client_secret' => $configData['vec_client_secret'],
                 'vec_redirect_uri' => $configData['vec_redirect_uri']
             ]);
-
+            DB::commit();
             Log::info('Google configuration stored successfully', [
                 'uid' => $config->uid,
                 'vendor_id' => $config->vec_vendor_id,
@@ -568,11 +642,20 @@ class GoogleOAuthService implements OAuthServiceInterface
             return $config;
 
         } catch (\Exception $e) {
+            DB::rollBack();
             Log::error('Error storing Google configuration', [
-                'error' => $e->getMessage(),
+                'error_message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
                 'config_data' => $configData,
                 'trace' => $e->getTraceAsString(),
             ]);
+
+            // Re-throw if it's already an OAuthException, otherwise wrap it
+            if ($e instanceof OAuthException) {
+                throw $e;
+            }
+
             throw new OAuthException('Error storing Google configuration: ' . $e->getMessage());
         }
     }
