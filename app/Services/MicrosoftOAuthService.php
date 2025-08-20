@@ -479,7 +479,7 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             $config->update([
                 'vec_access_token' => null,
                 'vec_refresh_token' => null,
-                'vec_expires_in' => null,
+                'vec_expires_in' => 0,
                 'vec_expires_at' => null,
             ]);
             DB::commit();
@@ -662,7 +662,7 @@ class MicrosoftOAuthService implements OAuthServiceInterface
 
             return $config;
 
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             DB::rollBack();
             Log::error('Error storing Microsoft configuration', [
                 'error_message' => $e->getMessage(),
