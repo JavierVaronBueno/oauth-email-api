@@ -292,9 +292,9 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             DB::beginTransaction();
             $config->update([
                 'vec_access_token' => $tokenData['access_token'],
-                'vec_refresh_token' => $tokenData['refresh_token'] ?? $config->vec_refresh_token,
+                'vec_refresh_token' => $tokenData['refresh_token'] ?? null,
                 'vec_expires_in' => $tokenData['expires_in'],
-                'vec_expires_at' => Carbon::now()->addSeconds($tokenData['expires_in']),
+                'vec_expires_at' => Carbon::now()->addSeconds($tokenData['expires_in'])
             ]);
             DB::commit();
 
