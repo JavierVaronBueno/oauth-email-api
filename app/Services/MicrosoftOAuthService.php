@@ -80,7 +80,7 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             throw OAuthException::invalidConfiguration('Configuration not found for UID: ' . $uid);
         }
 
-        if ($config->vec_provider_api !== LfVendorEmailConfiguration::PROVIDER_MICROSOFT) {
+        if (!$config->isMicrosoftProvider()) {
             throw OAuthException::invalidConfiguration('Configuration is not for Microsoft Graph.');
         }
 
