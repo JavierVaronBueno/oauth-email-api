@@ -581,7 +581,7 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             'message' => [
                 'subject' => $emailData['subject'],
                 'body' => [
-                'contentType' => 'HTML', // Defaulting to HTML
+                'contentType' => $emailData['content_type'] ?? 'HTML', // Defaulting to HTML
                 'content' => $emailData['content'],
                 ],
                 'toRecipients' => [
