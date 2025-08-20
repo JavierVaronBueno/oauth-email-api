@@ -475,12 +475,14 @@ class MicrosoftOAuthService implements OAuthServiceInterface
              * directly via an API call for user-delegated permissions.
              * The common approach is to clear the tokens from the application's side.
              */
+            DB::beginTransaction();
             $config->update([
                 'vec_access_token' => null,
                 'vec_refresh_token' => null,
                 'vec_expires_in' => null,
                 'vec_expires_at' => null,
             ]);
+            DB::commit();
 
             Log::info('Microsoft token cleared from configuration (simulated revocation)', [
                 'config_id' => $config->uid
@@ -489,6 +491,7 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             return true;
 
         } catch (Exception $e) {
+            DB::rollBack();
             Log::error('Error clearing Microsoft token from configuration', [
                 'config_id' => $config->uid,
                 'error_message' => $e->getMessage(),
