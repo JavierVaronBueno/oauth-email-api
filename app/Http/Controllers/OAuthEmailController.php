@@ -463,7 +463,7 @@ class OAuthEmailController extends Controller
         try {
             $validator = Validator::make($request->all(), [
                 'vec_vendor_id' => 'required|integer|min:1',
-                'vec_location_id' => 'required|integer|min:1',
+                'vec_location_id' => 'nullable|integer|min:1',
                 'vec_user_email' => 'nullable|email|max:255',
                 'vec_provider_api' => ['required', Rule::in(LfVendorEmailConfiguration::VALID_PROVIDERS)],
                 'vec_client_id' => 'required|string|max:255',
