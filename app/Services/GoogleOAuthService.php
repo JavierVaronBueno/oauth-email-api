@@ -166,7 +166,7 @@ class GoogleOAuthService implements OAuthServiceInterface
             if ($e instanceof OAuthException) {
                 throw $e;
             }
-            
+
             throw new OAuthException('Error processing Google callback: ' . $e->getMessage());
         }
     }
@@ -178,12 +178,15 @@ class GoogleOAuthService implements OAuthServiceInterface
     {
         try {
             DB::beginTransaction();
+
             $config->update([
                 'vec_access_token' => $tokenData['access_token'],
                 'vec_refresh_token' => $tokenData['refresh_token'] ?? $config->vec_refresh_token,
                 'vec_expires_in' => $tokenData['expires_in'],
                 'vec_expires_at' => Carbon::now()->addSeconds($tokenData['expires_in']),
                 'vec_user_email' => $tokenData['user_info']['email'] ?? null,
+                'vec_refresh_token_expires_in' => $tokenData['refresh_token_expires_in'] ?? null,
+                'vec_refresh_token_expires_at' => Carbon::now()->addSeconds($tokenData['refresh_token_expires_in']) ?? null,
             ]);
 
             DB::commit();
@@ -458,8 +461,10 @@ class GoogleOAuthService implements OAuthServiceInterface
                 $config->update([
                     'vec_access_token' => null,
                     'vec_refresh_token' => null,
-                    'vec_expires_in' => 0,
+                    'vec_expires_in' => null,
                     'vec_expires_at' => null,
+                    'vec_refresh_token_expires_in' => null,
+                    'vec_refresh_token_expires_at' => null,
                 ]);
                 Log::info('Google token revoked successfully for UID: ' . $config->uid);
                 return true;
@@ -626,7 +631,7 @@ class GoogleOAuthService implements OAuthServiceInterface
             // Crear nueva configuración
             $config = LfVendorEmailConfiguration::create([
                 'vec_vendor_id' => $configData['vec_vendor_id'],
-                'vec_location_id' => $configData['vec_location_id'],
+                'vec_location_id' => $configData['vec_location_id'] ?? null,
                 'vec_user_email' => $configData['vec_user_email'] ?? null,
                 'vec_provider_api' => LfVendorEmailConfiguration::PROVIDER_GOOGLE,
                 'vec_client_id' => $configData['vec_client_id'],
@@ -673,7 +678,7 @@ class GoogleOAuthService implements OAuthServiceInterface
     {
         $requiredFields = [
             'vec_vendor_id' => 'Vendor ID',
-            'vec_location_id' => 'Location ID',
+            // 'vec_location_id' => 'Location ID',
             'vec_user_email' => 'User Email',
             'vec_client_id' => 'Client ID',
             'vec_client_secret' => 'Client Secret',
@@ -690,9 +695,9 @@ class GoogleOAuthService implements OAuthServiceInterface
             throw new OAuthException('The Vendor ID must be a positive integer');
         }
 
-        if (!is_int($configData['vec_location_id']) || $configData['vec_location_id'] <= 0) {
-            throw new OAuthException('The Location ID must be a positive integer');
-        }
+        // if (!is_int($configData['vec_location_id']) || $configData['vec_location_id'] <= 0) {
+        //     throw new OAuthException('The Location ID must be a positive integer');
+        // }
 
         if (isset($configData['vec_user_email']) && !filter_var($configData['vec_user_email'], FILTER_VALIDATE_EMAIL)) {
             throw new OAuthException('The User Email is not valid');
