@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Builder;
  *
  * @property int $uid Unique identifier for the configuration.
  * @property int $vec_vendor_id ID of the associated vendor.
- * @property int $vec_location_id ID of the associated location.
+ * @property int|null $vec_location_id ID of the associated location.
  * @property string|null $vec_user_email Configured user's email address.
  * @property string $vec_provider_api API provider (e.g., 'microsoft' or 'google').
  * @property string $vec_client_id API client ID.
@@ -27,6 +27,8 @@ use Illuminate\Database\Eloquent\Builder;
  * @property string|null $vec_refresh_token API refresh token.
  * @property int $vec_expires_in Token validity duration in seconds.
  * @property Carbon $vec_expires_at Date and time of token expiration.
+ * @property int $vec_refresh_token_expires_in Token validity duration for refresh token in seconds.
+ * @property Carbon|null $vec_refresh_token_expires_at Date and time of refresh token expiration.
  * @property Carbon|null $TS_create Creation timestamp of the record.
  * @property Carbon|null $TS_update Last update timestamp of the record.
  * @property Carbon|null $del Soft deletion timestamp.
@@ -88,6 +90,8 @@ class LfVendorEmailConfiguration extends Model
         'vec_refresh_token',
         'vec_expires_in',
         'vec_expires_at',
+        'vec_refresh_token_expires_in',
+        'vec_refresh_token_expires_at',
     ];
 
     /**
@@ -97,6 +101,7 @@ class LfVendorEmailConfiguration extends Model
      */
     protected $dates = [
         'vec_expires_at',
+        'vec_refresh_token_expires_at',
         'TS_create',
         'TS_update',
         'del',
@@ -113,6 +118,8 @@ class LfVendorEmailConfiguration extends Model
         'vec_location_id' => 'integer',
         'vec_expires_in' => 'integer',
         'vec_expires_at' => 'datetime',
+        'vec_refresh_token_expires_in' => 'integer',
+        'vec_refresh_token_expires_at' => 'datetime',
         'TS_create' => 'datetime',
         'TS_update' => 'datetime',
         'del' => 'datetime',
@@ -164,6 +171,16 @@ class LfVendorEmailConfiguration extends Model
     }
 
     /**
+     * Checks if the refresh token has expired.
+     *
+     * @return bool True if the token has expired, false otherwise.
+     */
+    public function isRefreshTokenExpired(): bool
+    {
+        return $this->vec_refresh_token_expires_at && Carbon::now()->greaterThan($this->vec_refresh_token_expires_at);
+    }
+
+    /**
      * Checks if the access refresh token is not null.
      *
      * @return bool True if the token is not null, false otherwise.
@@ -201,6 +218,16 @@ class LfVendorEmailConfiguration extends Model
     public function isTokenExpiringSoon(): bool
     {
         return $this->vec_expires_at && Carbon::now()->addMinutes(5)->greaterThan($this->vec_expires_at);
+    }
+
+    /**
+     * Checks if the refresh token is expiring soon (within the next 5 minutes).
+     *
+     * @return bool True if the token is expiring soon, false otherwise.
+     */
+    public function isRefreshTokenExpiringSoon(): bool
+    {
+        return $this->vec_refresh_token_expires_at && Carbon::now()->addMinutes(5)->greaterThan($this->vec_refresh_token_expires_at);
     }
 
     /**
@@ -246,6 +273,8 @@ class LfVendorEmailConfiguration extends Model
             'vec_refresh_token' => $tokenData['refresh_token'] ?? $this->vec_refresh_token,
             'vec_expires_in' => $tokenData['expires_in'],
             'vec_expires_at' => Carbon::now()->addSeconds($tokenData['expires_in']),
+            'vec_refresh_token_expires_in' => $tokenData['refresh_token_expires_in'] ?? null,
+            'vec_refresh_token_expires_at' => Carbon::now()->addSeconds($tokenData['refresh_token_expires_in']) ?? null,
         ]);
     }
 
@@ -259,8 +288,10 @@ class LfVendorEmailConfiguration extends Model
         return $this->update([
             'vec_access_token' => null,
             'vec_refresh_token' => null,
-            'vec_expires_in' => 0,
+            'vec_expires_in' => null,
             'vec_expires_at' => null,
+            'vec_refresh_token_expires_in' => null,
+            'vec_refresh_token_expires_at' => null,
         ]);
     }
 
