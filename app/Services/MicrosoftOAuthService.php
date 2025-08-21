@@ -644,7 +644,7 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             // Create new configuration
             $config = LfVendorEmailConfiguration::create([
                 'vec_vendor_id' => $configData['vec_vendor_id'],
-                'vec_location_id' => $configData['vec_location_id'],
+                'vec_location_id' => $configData['vec_location_id'] ?? null,
                 'vec_user_email' => $configData['vec_user_email'] ?? null,
                 'vec_provider_api' => LfVendorEmailConfiguration::PROVIDER_MICROSOFT,
                 'vec_client_id' => $configData['vec_client_id'],
@@ -695,7 +695,7 @@ class MicrosoftOAuthService implements OAuthServiceInterface
     {
         $requiredFields = [
             'vec_vendor_id' => 'ID del proveedor',
-            'vec_location_id' => 'ID de la ubicación',
+            // 'vec_location_id' => 'ID de la ubicación',
             'vec_user_email' => 'Correo electrónico del usuario',
             'vec_client_id' => 'ID del cliente',
             'vec_client_secret' => 'Secreto del cliente',
@@ -712,9 +712,9 @@ class MicrosoftOAuthService implements OAuthServiceInterface
             throw new OAuthException('The vendor ID must be a positive integer');
         }
 
-        if (!is_int($configData['vec_location_id']) || $configData['vec_location_id'] <= 0) {
-            throw new OAuthException('The location ID must be a positive integer');
-        }
+        // if (!is_int($configData['vec_location_id']) || $configData['vec_location_id'] <= 0) {
+        //     throw new OAuthException('The location ID must be a positive integer');
+        // }
 
         if (isset($configData['vec_user_email']) && !filter_var($configData['vec_user_email'], FILTER_VALIDATE_EMAIL)) {
             throw new OAuthException('The user email is not valid');
